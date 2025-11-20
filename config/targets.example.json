@@ -1,0 +1,13 @@
+[
+  {
+    "name": "home",
+    "repository": "/path/to/home/backup",
+    "password_file": "/etc/restic/home.pass"
+  },
+  {
+    "name": "work",
+    "repository": "s3:https://example.com/restic-work",
+    "password": "example-password",
+    "certificate_file": "/etc/restic/work-ca.pem"
+  }
+]
