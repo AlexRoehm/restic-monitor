@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+.github
+
+# Data and config
+data/
+config/
+*.db
+*.db-shm
+*.db-wal
+
+# Build artifacts
+restic-monitor
+frontend/dist
+frontend/node_modules
+
+# Documentation
+*.md
+LICENSE
+
+# Development
+.env
+.env.*
+.vscode
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

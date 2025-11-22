@@ -21,8 +21,14 @@ type Target struct {
 	Password        string
 	PasswordFile    string
 	CertificateFile string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	Disabled        bool
+	// Prune policy
+	KeepLast    int
+	KeepDaily   int
+	KeepWeekly  int
+	KeepMonthly int
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type SnapshotFile struct {
@@ -35,28 +41,31 @@ type SnapshotFile struct {
 }
 
 type BackupStatus struct {
-	ID            uint   `gorm:"primaryKey"`
-	Name          string `gorm:"uniqueIndex"`
-	Repository    string
-	LatestBackup  time.Time
-	SnapshotCount int
-	Health        bool
-	StatusMessage string
-	CheckedAt     time.Time
-	Files         []SnapshotFile `gorm:"constraint:OnDelete:CASCADE"`
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID               uint   `gorm:"primaryKey"`
+	Name             string `gorm:"uniqueIndex"`
+	Repository       string
+	LatestBackup     time.Time
+	LatestSnapshotID string
+	SnapshotCount    int
+	FileCount        int
+	Health           bool
+	StatusMessage    string
+	CheckedAt        time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type StatusData struct {
-	Name          string
-	Repository    string
-	LatestBackup  time.Time
-	SnapshotCount int
-	Health        bool
-	StatusMessage string
-	CheckedAt     time.Time
-	Files         []SnapshotFileData
+	Name             string
+	Repository       string
+	LatestBackup     time.Time
+	LatestSnapshotID string
+	SnapshotCount    int
+	FileCount        int
+	Health           bool
+	StatusMessage    string
+	CheckedAt        time.Time
+	FileListPath     string
 }
 
 type SnapshotFileData struct {
@@ -73,6 +82,12 @@ type TargetData struct {
 	Password        string `json:"password"`
 	PasswordFile    string `json:"password_file"`
 	CertificateFile string `json:"certificate_file"`
+	Disabled        bool   `json:"disabled"`
+	// Prune policy
+	KeepLast    int `json:"keep_last"`
+	KeepDaily   int `json:"keep_daily"`
+	KeepWeekly  int `json:"keep_weekly"`
+	KeepMonthly int `json:"keep_monthly"`
 }
 
 func New(dsn string) (*Store, error) {
@@ -102,7 +117,9 @@ func (s *Store) SaveStatus(ctx context.Context, data StatusData) error {
 
 	status.Repository = data.Repository
 	status.LatestBackup = data.LatestBackup
+	status.LatestSnapshotID = data.LatestSnapshotID
 	status.SnapshotCount = data.SnapshotCount
+	status.FileCount = data.FileCount
 	status.Health = data.Health
 	status.StatusMessage = data.StatusMessage
 	status.CheckedAt = data.CheckedAt
@@ -111,34 +128,12 @@ func (s *Store) SaveStatus(ctx context.Context, data StatusData) error {
 		return err
 	}
 
-	if err := tx.Where("backup_status_id = ?", status.ID).Delete(&SnapshotFile{}).Error; err != nil {
-		return err
-	}
-
-	files := make([]SnapshotFile, 0, len(data.Files))
-	for _, file := range data.Files {
-		files = append(files, SnapshotFile{
-			BackupStatusID: status.ID,
-			Path:           file.Path,
-			Name:           file.Name,
-			Type:           file.Type,
-			Size:           file.Size,
-		})
-	}
-
-	if len(files) > 0 {
-		if err := tx.Create(&files).Error; err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
 func (s *Store) ListStatuses(ctx context.Context) ([]BackupStatus, error) {
 	var statuses []BackupStatus
 	err := s.db.WithContext(ctx).
-		Preload("Files").
 		Order("updated_at desc").
 		Find(&statuses).Error
 	return statuses, err
@@ -147,10 +142,22 @@ func (s *Store) ListStatuses(ctx context.Context) ([]BackupStatus, error) {
 func (s *Store) GetStatus(ctx context.Context, name string) (BackupStatus, error) {
 	var status BackupStatus
 	err := s.db.WithContext(ctx).
-		Preload("Files").
 		Where("name = ?", name).
 		First(&status).Error
 	return status, err
+}
+
+// GetLatestBackupTime returns just the latest backup timestamp for a target without loading files
+func (s *Store) GetLatestBackupTime(ctx context.Context, name string) (time.Time, error) {
+	var status BackupStatus
+	err := s.db.WithContext(ctx).
+		Select("latest_backup").
+		Where("name = ?", name).
+		First(&status).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return time.Time{}, nil
+	}
+	return status.LatestBackup, err
 }
 
 // UpsertTargets inserts or updates Restic targets.
@@ -174,6 +181,11 @@ func (s *Store) UpsertTargets(ctx context.Context, targets []TargetData) error {
 		target.Password = input.Password
 		target.PasswordFile = input.PasswordFile
 		target.CertificateFile = input.CertificateFile
+		target.Disabled = input.Disabled
+		target.KeepLast = input.KeepLast
+		target.KeepDaily = input.KeepDaily
+		target.KeepWeekly = input.KeepWeekly
+		target.KeepMonthly = input.KeepMonthly
 
 		if err := tx.Save(&target).Error; err != nil {
 			return err
@@ -190,4 +202,13 @@ func (s *Store) ListTargets(ctx context.Context) ([]Target, error) {
 		Order("name asc").
 		Find(&targets).Error
 	return targets, err
+}
+
+func (s *Store) ToggleTargetDisabled(ctx context.Context, name string) error {
+	var target Target
+	if err := s.db.WithContext(ctx).Where("name = ?", name).First(&target).Error; err != nil {
+		return err
+	}
+	target.Disabled = !target.Disabled
+	return s.db.WithContext(ctx).Save(&target).Error
 }

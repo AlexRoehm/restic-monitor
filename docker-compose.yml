@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  restic-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: guxxde/restic-monitor:latest
+    container_name: restic-monitor
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      # Mount your restic repositories (example)
+      # - /path/to/restic/repo:/mnt/backup:ro
+      # Mount certificate files if needed
+      # - /path/to/certs:/certs:ro
+    environment:
+      - DATABASE_DSN=/app/data/restic-monitor.db
+      - TARGETS_FILE=/app/config/targets.json
+      - API_LISTEN_ADDR=:8080
+      - CHECK_INTERVAL=10m
+      - RESTIC_TIMEOUT=3m
+      - SNAPSHOT_FILE_LIMIT=200000
+      - PUBLIC_DIR=public
+      - SHOW_SWAGGER=true
+      # Authentication - you can use both or either
+      - AUTH_USERNAME=admin
+      - AUTH_PASSWORD=admin
+      - AUTH_TOKEN=thxisisauthtoken
+      # Add restic credentials via environment or use targets.json
+      # - RESTIC_PASSWORD=yourpassword
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/api/v1/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

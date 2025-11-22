@@ -1,0 +1,424 @@
+openapi: 3.0.3
+info:
+  title: Restic Monitor API
+  description: |
+    API for monitoring Restic backup repositories. 
+    Provides endpoints to check backup status, view snapshots, manage locked repositories, and prune old backups.
+  version: 1.0.0
+  contact:
+    name: Restic Monitor
+    
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local development server
+  - url: https://your-server.com/api/v1
+    description: Production server
+
+security:
+  - basicAuth: []
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: HTTP Basic Authentication with username and password
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer token authentication using API token
+      
+  schemas:
+    BackupStatus:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Unique name of the backup target
+          example: "home"
+        latestBackup:
+          type: string
+          format: date-time
+          description: Timestamp of the most recent snapshot
+          example: "2025-11-22T10:30:00Z"
+        latestSnapshotID:
+          type: string
+          description: ID of the latest snapshot
+          example: "a1b2c3d4e5f6g7h8i9j0"
+        snapshotCount:
+          type: integer
+          description: Total number of snapshots in the repository
+          example: 42
+        fileCount:
+          type: integer
+          description: Number of files in the latest snapshot
+          example: 15234
+        health:
+          type: boolean
+          description: Whether the repository is healthy
+          example: true
+        statusMessage:
+          type: string
+          description: Error or status message if health is false
+          example: "repository is locked"
+        checkedAt:
+          type: string
+          format: date-time
+          description: Timestamp when the status was last checked
+          example: "2025-11-22T11:00:00Z"
+        disabled:
+          type: boolean
+          description: Whether monitoring is disabled for this target
+          example: false
+          
+    Snapshot:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Full snapshot ID
+          example: "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0"
+        short_id:
+          type: string
+          description: Short snapshot ID (first 8 characters)
+          example: "a1b2c3d4"
+        time:
+          type: string
+          format: date-time
+          description: When the snapshot was created
+          example: "2025-11-22T10:30:00Z"
+        hostname:
+          type: string
+          description: Hostname where the backup was created
+          example: "server01"
+        username:
+          type: string
+          description: Username who created the backup
+          example: "root"
+        paths:
+          type: array
+          items:
+            type: string
+          description: Paths that were backed up
+          example: ["/home/user", "/etc"]
+        tags:
+          type: array
+          items:
+            type: string
+          description: Tags associated with the snapshot
+          example: ["daily", "production"]
+          
+    FileEntry:
+      type: object
+      properties:
+        path:
+          type: string
+          description: Full path to the file
+          example: "/home/user/documents/file.txt"
+        name:
+          type: string
+          description: File name
+          example: "file.txt"
+        type:
+          type: string
+          enum: [file, dir]
+          description: Type of entry
+          example: "file"
+        size:
+          type: integer
+          format: int64
+          description: Size in bytes
+          example: 2048
+        mtime:
+          type: string
+          format: date-time
+          description: Last modification time
+          example: "2025-11-20T14:30:00Z"
+          
+    SuccessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          description: Status message
+          example: "success"
+          
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: "target not found"
+
+paths:
+  /status:
+    get:
+      summary: Get status of all backup targets
+      description: Returns the current status of all configured backup targets including health, snapshot counts, and last check time
+      operationId: getStatus
+      tags:
+        - Status
+      responses:
+        '200':
+          description: Successful response with array of backup statuses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BackupStatus'
+        '401':
+          description: Unauthorized - authentication required
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Unauthorized"
+        '500':
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                
+  /status/{name}:
+    get:
+      summary: Get status of a specific backup target
+      description: Returns the current status of a single backup target by name
+      operationId: getStatusByName
+      tags:
+        - Status
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Name of the backup target
+          schema:
+            type: string
+          example: "home"
+      responses:
+        '200':
+          description: Successful response with backup status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupStatus'
+        '400':
+          description: Bad request - target name missing
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          description: Unauthorized - authentication required
+        '404':
+          description: Target not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                
+  /snapshots/{name}:
+    get:
+      summary: Get snapshots for a specific backup target
+      description: Returns list of all snapshots for the specified backup target
+      operationId: getSnapshots
+      tags:
+        - Snapshots
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Name of the backup target
+          schema:
+            type: string
+          example: "home"
+      responses:
+        '200':
+          description: Successful response with array of snapshots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Snapshot'
+        '400':
+          description: Bad request - target name missing
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          description: Unauthorized
+        '404':
+          description: Target not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: Internal server error
+          
+  /snapshot/{id}:
+    get:
+      summary: Get file list for a specific snapshot
+      description: Returns the list of files contained in the specified snapshot
+      operationId: getSnapshotFiles
+      tags:
+        - Snapshots
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Snapshot ID
+          schema:
+            type: string
+          example: "a1b2c3d4e5f6g7h8i9j0"
+      responses:
+        '200':
+          description: Successful response with array of files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FileEntry'
+        '400':
+          description: Bad request - snapshot ID missing
+        '401':
+          description: Unauthorized
+        '404':
+          description: Snapshot file list not found
+        '500':
+          description: Internal server error
+          
+  /unlock/{name}:
+    post:
+      summary: Unlock a locked repository
+      description: Removes stale locks from a repository and triggers an immediate re-check
+      operationId: unlockRepository
+      tags:
+        - Management
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Name of the backup target to unlock
+          schema:
+            type: string
+          example: "home"
+      responses:
+        '200':
+          description: Repository unlocked successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+              example:
+                status: "unlocked"
+        '400':
+          description: Bad request - target name missing
+        '401':
+          description: Unauthorized
+        '404':
+          description: Target not found
+        '405':
+          description: Method not allowed - only POST accepted
+        '500':
+          description: Unlock operation failed
+          
+  /prune/{name}:
+    post:
+      summary: Prune old snapshots from a repository
+      description: |
+        Executes restic forget with the configured retention policy for the specified target.
+        Removes snapshots according to keep-last, keep-daily, keep-weekly, and keep-monthly settings.
+        Also deletes file lists for removed snapshots and triggers a re-check.
+      operationId: pruneRepository
+      tags:
+        - Management
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Name of the backup target to prune, or "all" to prune all targets
+          schema:
+            type: string
+          example: "home"
+      responses:
+        '200':
+          description: Prune completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+              examples:
+                single:
+                  summary: Single target pruned
+                  value:
+                    status: "pruned"
+                all:
+                  summary: All targets pruned
+                  value:
+                    status: "pruned all"
+        '400':
+          description: Bad request - target name missing
+        '401':
+          description: Unauthorized
+        '404':
+          description: Target not found
+        '405':
+          description: Method not allowed - only POST accepted
+        '500':
+          description: Prune operation failed
+          
+  /toggle/{name}:
+    post:
+      summary: Toggle monitoring state for a target
+      description: Enables or disables monitoring for the specified backup target
+      operationId: toggleTargetDisabled
+      tags:
+        - Management
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Name of the backup target to toggle
+          schema:
+            type: string
+          example: "home"
+      responses:
+        '200':
+          description: Target state toggled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+              example:
+                status: "toggled"
+        '400':
+          description: Bad request - target name missing
+        '401':
+          description: Unauthorized
+        '404':
+          description: Target not found
+        '405':
+          description: Method not allowed - only POST accepted
+        '500':
+          description: Toggle operation failed
+
+tags:
+  - name: Status
+    description: Endpoints for checking backup status
+  - name: Snapshots
+    description: Endpoints for viewing snapshot information
+  - name: Management
+    description: Endpoints for managing repositories (unlock, prune, toggle)

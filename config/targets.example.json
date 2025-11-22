@@ -2,12 +2,20 @@
   {
     "name": "home",
     "repository": "/path/to/home/backup",
-    "password_file": "/etc/restic/home.pass"
+    "password_file": "/etc/restic/home.pass",
+    "keep_last": 10,
+    "keep_daily": 7,
+    "keep_weekly": 4,
+    "keep_monthly": 6
   },
   {
     "name": "work",
     "repository": "s3:https://example.com/restic-work",
     "password": "example-password",
-    "certificate_file": "/etc/restic/work-ca.pem"
+    "certificate_file": "/etc/restic/work-ca.pem",
+    "keep_last": 5,
+    "keep_daily": 4,
+    "keep_weekly": 3,
+    "keep_monthly": 2
   }
 ]

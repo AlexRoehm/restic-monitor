@@ -25,7 +25,7 @@ restic-monitor
 
 # Tmp
 tmp
-
+public
 main
 
 # Environment files with secrets

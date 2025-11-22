@@ -16,20 +16,27 @@ import (
 )
 
 type Monitor struct {
-	cfg   config.Config
-	store *store.Store
+	cfg     config.Config
+	store   *store.Store
+	trigger chan string
 }
 
 func New(cfg config.Config, str *store.Store) *Monitor {
-	return &Monitor{cfg: cfg, store: str}
+	return &Monitor{
+		cfg:     cfg,
+		store:   str,
+		trigger: make(chan string, 10),
+	}
 }
 
 func (m *Monitor) Start(ctx context.Context) {
 	ticker := time.NewTicker(m.cfg.CheckInterval)
 	defer ticker.Stop()
 
-	log.Printf("monitor starting, running initial check")
-	m.runOnce(ctx)
+	log.Printf("monitor starting, scheduling initial check")
+	// Run initial check in background, don't block startup
+	go m.runOnce(ctx)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -37,6 +44,9 @@ func (m *Monitor) Start(ctx context.Context) {
 			return
 		case <-ticker.C:
 			m.runOnce(ctx)
+		case targetName := <-m.trigger:
+			log.Printf("triggered immediate check for target %s", targetName)
+			m.runTargetByName(ctx, targetName)
 		}
 	}
 }
@@ -54,6 +64,10 @@ func (m *Monitor) runOnce(ctx context.Context) {
 
 	log.Printf("checking %d target(s)", len(targets))
 	for _, target := range targets {
+		if target.Disabled {
+			log.Printf("skipping disabled target %s", target.Name)
+			continue
+		}
 		m.runTarget(ctx, target)
 	}
 }
@@ -80,29 +94,43 @@ func (m *Monitor) runTarget(ctx context.Context, target store.Target) {
 	data.SnapshotCount = len(snapshots)
 	if latest := latestSnapshot(snapshots); latest != nil {
 		data.LatestBackup = latest.Time
+		data.LatestSnapshotID = latest.ID
 		log.Printf("target %s: latest snapshot %s from %s", target.Name, latest.ID, latest.Time.Format(time.RFC3339))
-		files, err := m.listSnapshotFiles(ctx, target, latest.ID)
+
+		// Only load files if this is a new snapshot
+		previousLatest, err := m.store.GetLatestBackupTime(ctx, target.Name)
 		if err != nil {
-			log.Printf("target %s: error listing files: %v", target.Name, err)
-			// Don't add to status message, just use empty files
+			log.Printf("target %s: error getting previous latest backup time: %v", target.Name, err)
+		}
+
+		isNewSnapshot := previousLatest.IsZero() || latest.Time.After(previousLatest)
+		if isNewSnapshot {
+			log.Printf("target %s: new snapshot detected, saving file list", target.Name)
+			fileCount, err := m.saveSnapshotFileList(ctx, target, latest.ID)
+			if err != nil {
+				log.Printf("target %s: error saving file list: %v", target.Name, err)
+			} else {
+				data.FileCount = fileCount
+			}
 		} else {
-			log.Printf("target %s: retrieved %d file(s)", target.Name, len(files))
-			data.Files = files
+			log.Printf("target %s: no new snapshot, skipping file list save", target.Name)
+			// Get file count from existing file if available
+			if fileCount, err := m.getFileCount(latest.ID); err == nil {
+				data.FileCount = fileCount
+			}
 		}
 	}
 
 	log.Printf("target %s: running health check", target.Name)
 	healthy, msg := m.checkHealth(ctx, target)
-	// If repository is locked, treat as healthy but note the lock
-	if strings.Contains(msg, "repository is already locked") {
-		log.Printf("target %s: repository locked, skipping health check", target.Name)
-		data.Health = true
-		data.StatusMessage = joinStatus(data.StatusMessage, "repository locked (health check skipped)")
-	} else {
-		data.Health = healthy
-		if msg != "" && !healthy {
-			data.StatusMessage = joinStatus(data.StatusMessage, msg)
-		}
+	data.Health = healthy
+
+	// Only mark as locked if health check specifically failed due to lock
+	if !healthy && strings.Contains(msg, "repository is already locked") {
+		log.Printf("target %s: repository locked during health check", target.Name)
+		data.StatusMessage = joinStatus(data.StatusMessage, "repository locked")
+	} else if msg != "" && !healthy {
+		data.StatusMessage = joinStatus(data.StatusMessage, msg)
 	}
 	log.Printf("target %s: health=%v", target.Name, data.Health)
 
@@ -134,11 +162,11 @@ func (m *Monitor) listSnapshots(ctx context.Context, target store.Target) ([]res
 		log.Printf("target %s: using certificate file: %s", target.Name, certFile)
 	}
 
-	// Create timeout context (30 seconds for snapshots)
-	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// Create timeout context using configured timeout
+	timeoutCtx, cancel := context.WithTimeout(ctx, m.cfg.ResticTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(timeoutCtx, m.cfg.ResticBinary, "snapshots", "--json")
+	cmd := exec.CommandContext(timeoutCtx, m.cfg.ResticBinary, "snapshots", "--json", "--no-lock")
 	cmd.Env = append(os.Environ(), m.envForTarget(target)...)
 
 	log.Printf("target %s: executing: %s snapshots --json (timeout: 30s)", target.Name, m.cfg.ResticBinary)
@@ -163,14 +191,102 @@ func (m *Monitor) listSnapshots(ctx context.Context, target store.Target) ([]res
 	return snapshots, nil
 }
 
+func (m *Monitor) saveSnapshotFileList(ctx context.Context, target store.Target, snapshotID string) (int, error) {
+	log.Printf("target %s: executing: %s ls %s --json", target.Name, m.cfg.ResticBinary, snapshotID)
+
+	// Create timeout context using configured timeout
+	timeoutCtx, cancel := context.WithTimeout(ctx, m.cfg.ResticTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(timeoutCtx, m.cfg.ResticBinary, "ls", snapshotID, "--json", "--no-lock")
+	cmd.Env = append(os.Environ(), m.envForTarget(target)...)
+
+	// Ensure public directory exists
+	if err := os.MkdirAll(m.cfg.PublicDir, 0755); err != nil {
+		return 0, fmt.Errorf("create public directory: %w", err)
+	}
+
+	// Create output file
+	outputPath := fmt.Sprintf("%s/%s.txt", m.cfg.PublicDir, snapshotID)
+	outFile, err := os.Create(outputPath)
+	if err != nil {
+		return 0, fmt.Errorf("create output file: %w", err)
+	}
+	defer outFile.Close()
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return 0, err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	fileCount := 0
+
+	for scanner.Scan() {
+		if fileCount >= m.cfg.SnapshotLimit {
+			break
+		}
+		var entry resticLsEntry
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+			continue
+		}
+
+		// Write as JSON line
+		line := fmt.Sprintf("{\"path\":%q,\"name\":%q,\"type\":%q,\"size\":%d,\"mtime\":%q}\n",
+			entry.Path, entry.Name, entry.Type, entry.Size, entry.Mtime)
+		if _, err := outFile.WriteString(line); err != nil {
+			log.Printf("target %s: error writing to file: %v", target.Name, err)
+			break
+		}
+		fileCount++
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("target %s: scanner error reading ls output: %v", target.Name, err)
+		return fileCount, err
+	}
+
+	if err := cmd.Wait(); err != nil {
+		if timeoutCtx.Err() == context.DeadlineExceeded {
+			log.Printf("target %s: restic ls timed out after configured timeout, saved partial results (%d files)", target.Name, fileCount)
+			return fileCount, nil // Partial results are OK on timeout
+		}
+		log.Printf("target %s: restic ls failed: %v", target.Name, err)
+		return fileCount, err
+	}
+
+	log.Printf("target %s: successfully saved %d files to %s", target.Name, fileCount, outputPath)
+	return fileCount, nil
+}
+
+func (m *Monitor) getFileCount(snapshotID string) (int, error) {
+	filePath := fmt.Sprintf("%s/%s.txt", m.cfg.PublicDir, snapshotID)
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	count := 0
+	for scanner.Scan() {
+		count++
+	}
+	return count, scanner.Err()
+}
+
 func (m *Monitor) listSnapshotFiles(ctx context.Context, target store.Target, snapshotID string) ([]store.SnapshotFileData, error) {
 	log.Printf("target %s: executing: %s ls %s --json", target.Name, m.cfg.ResticBinary, snapshotID)
 
-	// Create timeout context (60 seconds for ls)
-	timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	// Create timeout context using configured timeout
+	timeoutCtx, cancel := context.WithTimeout(ctx, m.cfg.ResticTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(timeoutCtx, m.cfg.ResticBinary, "ls", snapshotID, "--json")
+	cmd := exec.CommandContext(timeoutCtx, m.cfg.ResticBinary, "ls", snapshotID, "--json", "--no-lock")
 	cmd.Env = append(os.Environ(), m.envForTarget(target)...)
 
 	stdout, err := cmd.StdoutPipe()
@@ -222,16 +338,16 @@ func (m *Monitor) listSnapshotFiles(ctx context.Context, target store.Target, sn
 func (m *Monitor) checkHealth(ctx context.Context, target store.Target) (bool, string) {
 	log.Printf("target %s: executing: %s check --json", target.Name, m.cfg.ResticBinary)
 
-	// Create timeout context (60 seconds for check)
-	timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	// Create timeout context using configured timeout
+	timeoutCtx, cancel := context.WithTimeout(ctx, m.cfg.ResticTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(timeoutCtx, m.cfg.ResticBinary, "check", "--json")
+	cmd := exec.CommandContext(timeoutCtx, m.cfg.ResticBinary, "check", "--json", "--no-lock")
 	cmd.Env = append(os.Environ(), m.envForTarget(target)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if timeoutCtx.Err() == context.DeadlineExceeded {
-			log.Printf("target %s: restic check timed out after 60s", target.Name)
+			log.Printf("target %s: restic check timed out after %s", target.Name, m.cfg.ResticTimeout)
 			return false, "restic check: timeout"
 		}
 		log.Printf("target %s: restic check failed: %v, output: %s", target.Name, err, strings.TrimSpace(string(out)))
@@ -272,6 +388,34 @@ func (m *Monitor) envForTarget(target store.Target) []string {
 	return actualEnv
 }
 
+// TriggerCheck triggers an immediate check for a specific target
+func (m *Monitor) TriggerCheck(targetName string) {
+	select {
+	case m.trigger <- targetName:
+		log.Printf("queued immediate check for target %s", targetName)
+	default:
+		log.Printf("trigger channel full, skipping immediate check for target %s", targetName)
+	}
+}
+
+// runTargetByName looks up a target by name and runs a check on it
+func (m *Monitor) runTargetByName(ctx context.Context, targetName string) {
+	targets, err := m.store.ListTargets(ctx)
+	if err != nil {
+		log.Printf("list targets for immediate check: %v", err)
+		return
+	}
+
+	for _, target := range targets {
+		if target.Name == targetName {
+			m.runTarget(ctx, target)
+			return
+		}
+	}
+
+	log.Printf("target %s not found for immediate check", targetName)
+}
+
 func latestSnapshot(list []resticSnapshot) *resticSnapshot {
 	if len(list) == 0 {
 		return nil
@@ -291,8 +435,9 @@ type resticSnapshot struct {
 }
 
 type resticLsEntry struct {
-	Path string `json:"path"`
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Size int64  `json:"size"`
+	Path  string `json:"path"`
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Size  int64  `json:"size"`
+	Mtime string `json:"mtime"`
 }
