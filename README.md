@@ -1,75 +1,208 @@
-# Restic Backup Monitor
+# 📦 restic-monitor
 
-A beautiful web-based monitoring dashboard for Restic backup repositories. Monitor multiple backup targets, check their health status, and unlock locked repositories - all from a modern Vue.js interface.
+**Centralized Restic Backup Monitoring & (future) Management Platform**
 
-## Features
+`restic-monitor` is a Go-based backend with a Vue frontend designed to monitor the health, status, and snapshots of Restic backup repositories. It provides an easy way to visualize backup status across multiple Restic targets such as S3, MinIO, rest-server, and local filesystems.
 
-- 📊 **Beautiful Dashboard** - Modern UI built with Vue 3, Tailwind CSS, and DaisyUI
+This project currently focuses on **monitoring**, but is being expanded into a full **centralized backup management system** with lightweight cross-platform **backup agents**.
+
+---
+
+## 🚀 Current Features (v0.x)
+
+- 📊 **Beautiful Dashboard** - Modern UI built with Vue 3, Tailwind CSS v4, and DaisyUI v5
 - 🔍 **Multi-Target Monitoring** - Monitor multiple Restic repositories simultaneously
-- ✅ **Health Checks** - Automatic repository health validation
+- ✅ **Health Checks** - Automatic repository health validation with customizable age checks
 - 🔓 **Repository Unlock** - Unlock locked repositories with one click
+- 🗑️ **Prune Operations** - Configurable retention policies (keep-last, keep-daily, keep-weekly, keep-monthly)
+- 📸 **Snapshot Browser** - View all snapshots with metadata and file lists
 - 🌍 **Internationalization** - Built-in English and German translations
-- 🎨 **Dark Mode** - Light and dark theme support
+- 🎨 **Dark Mode** - Light and dark theme support with smooth transitions
 - 📱 **Responsive Design** - Works on desktop, tablet, and mobile
-- 🔄 **Auto-Refresh** - Real-time status updates every 30 seconds
+- 🔄 **Auto-Refresh** - Real-time status updates with smooth animations
+- 🔐 **Authentication** - Basic Auth and Bearer Token support
+- 📚 **API Documentation** - Interactive Swagger UI (optional)
 - 🐳 **Docker Support** - Easy deployment with Docker and Docker Compose
+- 🧪 **Mock Mode** - Development mode for testing without real Restic repositories
 
-## Quick Start with Docker
+---
 
-### Docker Compose (Recommended)
+## 🛠️ Work in Progress — New Architecture Roadmap
 
-1. Create a `config/targets.json` file:
+The project is evolving from a simple monitoring dashboard into a **complete backup orchestration platform**.
+
+### 🏗️ Planned Architecture
+
+`restic-monitor` will become the **central orchestrator**, responsible for:
+
+* Managing backup policies
+* Distributing backup tasks
+* Tracking agent health
+* Aggregating logs
+* Coordinating pruning and verification
+* Providing a modern UI for backup operations
+
+A new cross-platform **Backup Agent** (written in Go) will run on every machine that needs to be backed up.
+
+### 📡 Pull-Based Communication Model
+
+Each agent will:
+
+* Register itself with the orchestrator
+* Send periodic heartbeats
+* Poll for tasks (backup / check / prune)
+* Execute Restic commands locally
+* Send logs and status updates back to the orchestrator
+
+This design avoids firewall issues and works across Linux, Windows, and macOS.
+
+---
+
+## 🧩 Repository Structure (in Transition)
+
+```
+restic-monitor/
+│
+├── cmd/restic-monitor/  ← Main application entry point
+├── internal/            ← Core business logic
+│   ├── api/            ← REST API handlers
+│   ├── config/         ← Configuration management
+│   ├── monitor/        ← Restic monitoring logic
+│   └── store/          ← Database models & persistence
+├── frontend/           ← Vue 3 SPA
+│   ├── src/
+│   │   ├── App.vue    ← Main component
+│   │   ├── i18n.js    ← Internationalization
+│   │   └── style.css  ← Tailwind CSS v4
+│   └── public/        ← Static assets
+├── config/             ← Target configuration
+│   └── targets.json   ← Repository definitions
+├── api/                ← OpenAPI/Swagger documentation
+├── data/               ← SQLite database
+└── agent/              ← Future: Backup Agent (coming soon)
+
+---
+
+## 🧭 Feature Roadmap
+
+### Phase 1 — Foundations ✅
+
+✅ Architectural plan  
+✅ Multi-target monitoring  
+✅ Health checks with customizable age validation  
+✅ Prune with retention policies  
+✅ Swagger API documentation  
+✅ Mock mode for development  
+
+### Phase 2 — Backup Agent (Coming Soon)
+
+⬜ Go agent binary for Linux/Windows/macOS  
+⬜ Agent installation scripts  
+⬜ Task execution engine (restic backup/check/prune)  
+⬜ Secure token storage  
+⬜ API for agent registration & heartbeat  
+
+### Phase 3 — UI Enhancements
+
+⬜ Machine overview  
+⬜ Policy editor  
+⬜ Backup history & logs view  
+⬜ Real-time log streaming  
+
+### Phase 4 — Advanced Features
+
+⬜ Multi-repository routing  
+⬜ Auto-update system for agents  
+⬜ Notifications (email/Slack)  
+⬜ Plugin system for DB dumps / Docker volumes / VM snapshots  
+
+---
+
+## 🔍 Current Limitations
+
+* No agent system yet (manual Restic setup required)
+* No task scheduling (monitoring only)
+* No backup automation
+* No centralized policy management
+
+These limitations will be removed as the orchestrator/agent architecture is implemented.
+
+---
+
+## 📥 Installation
+
+### Quick Start with Docker Compose (Recommended)
+
+1. Clone the repository:
+
+```bash
+git clone https://github.com/AlexRoehm/restic-monitor.git
+cd restic-monitor
+```
+
+2. Create a `config/targets.json` file:
 
 ```json
 [
   {
-    "name": "production-db",
-    "repository": "rest:https://backup.example.com/prod-db",
-    "password": "your-restic-password"
+    "name": "home",
+    "repository": "/path/to/home/backup",
+    "password_file": "/etc/restic/home.pass",
+    "keep_last": 10,
+    "keep_daily": 7,
+    "keep_weekly": 4,
+    "keep_monthly": 6
   },
   {
-    "name": "home-server",
-    "repository": "/mnt/backup/home",
-    "passwordFile": "/secrets/restic-password.txt"
+    "name": "work",
+    "repository": "rest:https://backup.example.com/work",
+    "password": "your-restic-password",
+    "certificate_file": "/etc/restic/ca.pem",
+    "keep_last": 5,
+    "keep_daily": 4,
+    "keep_weekly": 3,
+    "keep_monthly": 2
+  },
+  {
+    "name": "archive",
+    "repository": "/mnt/backup/archive",
+    "password": "your-password",
+    "disabled": true,
+    "keep_last": 3
   }
 ]
 ```
 
-2. Run with Docker Compose:
+3. Run with Docker Compose:
 
 ```bash
 docker-compose up -d
 ```
 
-3. Open http://localhost:8080 in your browser
+4. Open http://localhost:8080 in your browser
 
-### Docker Run
+---
 
-```bash
-docker run -d \
-  -p 8080:8080 \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/config:/app/config \
-  --name restic-monitor \
-  guxxde/restic-monitor:latest
-```
-
-## Configuration
+## ⚙️ Configuration
 
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_DSN` | `/app/data/restic-monitor.db` | SQLite database path |
-| `TARGETS_FILE` | `/app/config/targets.json` | Path to targets configuration file |
-| `API_LISTEN_ADDR` | `:8080` | API server listen address |
-| `CHECK_INTERVAL` | `5m` | Interval between backup checks |
-| `RESTIC_TIMEOUT` | `2m` | Timeout for restic CLI commands |
-| `SNAPSHOT_FILE_LIMIT` | `200` | Maximum number of files to list per snapshot |
 | `RESTIC_BINARY` | `restic` | Path to restic binary |
-| `AUTH_USERNAME` | _(empty)_ | Basic auth username (optional, leave empty to disable auth) |
-| `AUTH_PASSWORD` | _(empty)_ | Basic auth password (optional, leave empty to disable auth) |
-| `AUTH_TOKEN` | _(empty)_ | API bearer token (optional, alternative to username/password) |
+| `DATABASE_DSN` | `restic-monitor.db` | SQLite database path |
+| `API_LISTEN_ADDR` | `:8080` | API server listen address |
+| `CHECK_INTERVAL` | `10m` | Interval between backup checks |
+| `RESTIC_TIMEOUT` | `3m` | Timeout for restic CLI commands |
+| `SNAPSHOT_FILE_LIMIT` | `200` | Maximum number of files to list per snapshot |
+| `TARGETS_FILE` | `config/targets.json` | Path to targets configuration file |
+| `STATIC_DIR` | `frontend/dist` | Frontend static files directory |
+| `PUBLIC_DIR` | `public` | Directory for snapshot file lists |
+| `AUTH_USERNAME` | _(empty)_ | Basic auth username (optional) |
+| `AUTH_PASSWORD` | _(empty)_ | Basic auth password (optional) |
+| `AUTH_TOKEN` | _(empty)_ | API bearer token (optional) |
+| `SHOW_SWAGGER` | `false` | Enable Swagger UI at `/api/v1/swagger` |
+| `MOCK_MODE` | `false` | Mock restic calls for development |
 
 **Note**: Authentication can be enabled using either:
 - **Basic Auth**: Set both `AUTH_USERNAME` and `AUTH_PASSWORD`
@@ -97,9 +230,14 @@ The `targets.json` file configures which Restic repositories to monitor:
 **Fields:**
 - `name` - Unique identifier for the target
 - `repository` - Restic repository URL or path
-- `password` - Restic repository password (optional if using passwordFile)
-- `passwordFile` - Path to file containing password (optional if using password)
-- `certificateFile` - Path to CA certificate for HTTPS repositories (optional)
+- `password` - Restic repository password (optional if using password_file)
+- `password_file` - Path to file containing password (optional if using password)
+- `certificate_file` - Path to CA certificate for HTTPS repositories (optional)
+- `disabled` - Set to `true` to skip monitoring this target (optional)
+- `keep_last` - Number of latest snapshots to keep during prune (optional)
+- `keep_daily` - Number of daily snapshots to keep (optional)
+- `keep_weekly` - Number of weekly snapshots to keep (optional)
+- `keep_monthly` - Number of monthly snapshots to keep (optional)
 
 ### Supported Repository Types
 
@@ -111,68 +249,109 @@ The `targets.json` file configures which Restic repositories to monitor:
 - B2: `b2:bucketname:/path`
 - And more - see [Restic documentation](https://restic.readthedocs.io/)
 
-## Development
+---
+
+## 🛠️ Development
 
 ### Prerequisites
 
-- Go 1.22 or later
+- Go 1.24 or later
 - Node.js 20 or later
-- Restic CLI
+- Restic CLI (for production mode)
+
+### Makefile Commands
+
+```bash
+make help          # Show all available commands
+make build         # Build both backend and frontend
+make run           # Run the application
+make dev-backend   # Run backend in development mode
+make dev-frontend  # Run frontend dev server
+make watch         # Watch and rebuild backend on changes (requires air)
+make swagger       # Generate Swagger/OpenAPI documentation
+make test          # Run Go tests
+make docker-build  # Build Docker image
+make clean         # Clean build artifacts
+```
 
 ### Build from Source
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/guxxde/restic-monitor.git
+git clone https://github.com/AlexRoehm/restic-monitor.git
 cd restic-monitor
 ```
 
-2. Build frontend:
+2. Install dependencies:
 ```bash
-cd frontend
-npm install
-npm run build
-cd ..
+make install  # Installs both Go and npm dependencies
 ```
 
-3. Build backend:
+3. Build:
 ```bash
-go mod download
-go build -o restic-monitor cmd/restic-monitor/main.go
+make build
 ```
 
-4. Create configuration:
+4. Configure:
 ```bash
-mkdir -p config data
 cp .env.example .env
+cp config/targets.example.json config/targets.json
 # Edit .env and config/targets.json
 ```
 
 5. Run:
 ```bash
-export $(cat .env | grep -v '^#' | xargs)
-./restic-monitor
+make run
 ```
 
-### Development Mode
+### Development Mode with Mock Data
 
-Backend:
+For development without real Restic repositories:
+
 ```bash
-export $(cat .env | grep -v '^#' | xargs)
-go run cmd/restic-monitor/main.go
+# In .env, set:
+MOCK_MODE=true
 ```
 
-Frontend:
+This will:
+- Return fake snapshot data
+- Skip actual restic command execution
+- Show one disabled and one unhealthy target for testing
+- Allow testing all UI features without real backups
+
+### Development Servers
+
+Run backend and frontend separately for hot-reload:
+
+**Terminal 1 - Backend:**
 ```bash
-cd frontend
-npm run dev
+make dev-backend
+# or with auto-reload:
+make watch
 ```
 
-The frontend dev server runs on http://localhost:5173 and proxies API requests to the backend on http://localhost:8080.
+**Terminal 2 - Frontend:**
+```bash
+make dev-frontend
+```
 
-## API Endpoints
+Frontend runs on http://localhost:5173 and proxies API requests to backend on http://localhost:8080.
 
-### GET `/status`
+---
+
+## 📡 API Documentation
+
+### Interactive API Explorer
+
+When `SHOW_SWAGGER=true` is set, visit:
+
+```
+http://localhost:8080/api/v1/swagger
+```
+
+### Main Endpoints
+
+#### GET `/api/v1/status`
 
 Get status of all targets or a specific target.
 
@@ -183,19 +362,58 @@ Get status of all targets or a specific target.
 ```json
 [
   {
-    "name": "production-db",
-    "repository": "rest:https://backup.example.com/prod-db",
-    "latestBackup": "2025-11-20T10:30:00Z",
+    "name": "home",
+    "latestBackup": "2025-11-23T10:30:00Z",
+    "latestSnapshotID": "a1b2c3d4",
     "snapshotCount": 42,
+    "fileCount": 1234,
     "health": true,
     "statusMessage": "",
-    "checkedAt": "2025-11-20T15:45:00Z",
-    "files": [...]
+    "checkedAt": "2025-11-23T15:45:00Z",
+    "disabled": false
   }
 ]
 ```
 
-### POST `/unlock/{name}`
+#### GET `/api/v1/status/{name}`
+
+Get status of a specific target with optional age validation.
+
+**Path Parameters:**
+- `name` - Target name
+
+**Query Parameters:**
+- `maxage` (optional) - Maximum age in hours. Returns healthy only if repository is healthy AND latest snapshot is younger than maxage hours.
+
+**Example:**
+```bash
+# Check if backup is healthy and less than 24 hours old
+curl http://localhost:8080/api/v1/status/home?maxage=24
+```
+
+#### GET `/api/v1/snapshots/{name}`
+
+Get all snapshots for a target.
+
+**Response:**
+```json
+[
+  {
+    "short_id": "a1b2c3d4",
+    "time": "2025-11-23T14:30:00Z",
+    "hostname": "myserver",
+    "username": "admin",
+    "paths": ["/home/user", "/etc"],
+    "tags": ["daily", "production"]
+  }
+]
+```
+
+#### GET `/api/v1/snapshot/{id}`
+
+Get file list for a specific snapshot.
+
+#### POST `/api/v1/unlock/{name}`
 
 Unlock a locked repository.
 
@@ -203,55 +421,132 @@ Unlock a locked repository.
 ```json
 {
   "status": "unlocked",
-  "target": "production-db",
+  "target": "home",
   "message": "successfully removed locks"
 }
 ```
 
-## Architecture
+#### POST `/api/v1/prune/{name}`
 
-- **Backend**: Go with GORM (SQLite), periodic Restic command execution
-- **Frontend**: Vue 3, Tailwind CSS v4, DaisyUI, vue-i18n
-- **Database**: SQLite (embedded, no external DB required)
-- **API**: RESTful HTTP API with CORS support
+Prune snapshots according to retention policy. Use `all` to prune all targets.
 
-## Security Considerations
-
-- Store passwords securely using `passwordFile` instead of plain text
-- Use HTTPS for remote repositories
-- Validate certificate files for TLS connections
-- Run container as non-root user (UID 1000)
-- Mount sensitive files read-only in Docker
-
-## GitHub Actions Setup
-
-To enable automatic Docker image builds:
-
-1. Go to your repository Settings → Secrets and variables → Actions
-2. Add the following secrets:
-   - `DOCKER_USERNAME` - Your Docker Hub username
-   - `DOCKER_PASSWORD` - Your Docker Hub password or access token
-
-The workflow will automatically:
-- Build multi-arch images (amd64/arm64) on push to main
-- Tag images with version tags on releases
-- Push to Docker Hub as `guxxde/restic-monitor`
-
-## Testing
-
+**Example:**
 ```bash
-go test ./...
+curl -X POST http://localhost:8080/api/v1/prune/home
+curl -X POST http://localhost:8080/api/v1/prune/all
 ```
 
-## License
+#### POST `/api/v1/toggle/{name}`
+
+Enable or disable monitoring for a target.
+
+---
+
+## 🏗️ Architecture
+
+- **Backend**: Go 1.24 with GORM (SQLite), periodic Restic execution
+- **Frontend**: Vue 3 with Composition API, Tailwind CSS v4, DaisyUI v5
+- **Database**: SQLite (embedded, no external DB required)
+- **API**: RESTful HTTP with OpenAPI/Swagger documentation
+- **File Storage**: JSONL files for snapshot file lists
+- **Internationalization**: vue-i18n (English and German)
+
+### Technology Stack
+
+**Backend:**
+- Go 1.24
+- GORM v2 (SQLite driver)
+- Standard library HTTP server
+- swaggo/swag for API documentation
+
+**Frontend:**
+- Vue 3 (Composition API)
+- Vite 6
+- Tailwind CSS v4
+- DaisyUI v5
+- vue-i18n v10
+
+---
+
+## 🔒 Security Considerations
+
+- Store passwords securely using `password_file` instead of plain text
+- Use HTTPS for remote repositories
+- Validate certificate files for TLS connections
+- Enable authentication in production (`AUTH_USERNAME`/`AUTH_PASSWORD` or `AUTH_TOKEN`)
+- Run container as non-root user
+- Mount sensitive files read-only in Docker
+- Keep `targets.json` with credentials outside version control
+
+---
+
+## 🐳 Docker Deployment
+
+### Docker Run
+
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/config:/app/config \
+  -v $(pwd)/public:/app/public \
+  -e SHOW_SWAGGER=true \
+  -e AUTH_USERNAME=admin \
+  -e AUTH_PASSWORD=admin \
+  --name restic-monitor \
+  guxxde/restic-monitor:latest
+```
+
+### Multi-Architecture Support
+
+Docker images are built for:
+- `linux/amd64`
+- `linux/arm64`
+
+---
+
+## 🧪 Testing
+
+```bash
+make test
+```
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! The upcoming agent architecture is documented in the roadmap above.
+
+**Areas for contribution:**
+- Agent system design and implementation
+- Additional UI features
+- Tests and documentation
+- Internationalization (new languages)
+- Plugin system for custom backup sources
+
+Please open an issue to discuss major changes before submitting a PR.
+
+---
+
+## 📜 License
 
 MIT License - see LICENSE file for details
 
-## Contributing
+---
 
-Contributions are welcome! Please open an issue or submit a pull request.
+## 🆘 Support
 
-## Support
-
-- [GitHub Issues](https://github.com/guxxde/restic-monitor/issues)
+- [GitHub Issues](https://github.com/AlexRoehm/restic-monitor/issues)
 - [Restic Documentation](https://restic.readthedocs.io/)
+
+---
+
+## 📚 Additional Resources
+
+- [Swagger API Documentation](http://localhost:8080/api/v1/swagger) (when `SHOW_SWAGGER=true`)
+- [Makefile Commands](Makefile) - See `make help` for all available commands
+- [Example Configuration](config/targets.example.json)
+
+---
+
+**Built with ❤️ for the Restic community**
