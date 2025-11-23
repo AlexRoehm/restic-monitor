@@ -24,6 +24,7 @@ type Config struct {
 	AuthToken       string
 	PublicDir       string
 	ShowSwagger     bool
+	MockMode        bool
 }
 
 // Load reads configuration values from environment variables.
@@ -45,6 +46,7 @@ func Load() (Config, error) {
 		AuthToken:       os.Getenv("AUTH_TOKEN"),
 		PublicDir:       firstNonEmpty(os.Getenv("PUBLIC_DIR"), "public"),
 		ShowSwagger:     os.Getenv("SHOW_SWAGGER") == "true",
+		MockMode:        os.Getenv("MOCK_MODE") == "true",
 	}
 
 	return cfg, nil

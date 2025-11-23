@@ -149,6 +149,22 @@ func joinStatus(previous, addition string) string {
 }
 
 func (m *Monitor) listSnapshots(ctx context.Context, target store.Target) ([]resticSnapshot, error) {
+	// Mock mode: return fake snapshots
+	if m.cfg.MockMode {
+		log.Printf("target %s: MOCK MODE - returning fake snapshots", target.Name)
+		now := time.Now()
+		return []resticSnapshot{
+			{
+				ID:   "mock1234",
+				Time: now.Add(-24 * time.Hour),
+			},
+			{
+				ID:   "mock0987",
+				Time: now.Add(-48 * time.Hour),
+			},
+		}, nil
+	}
+
 	// Validate certificate file if specified
 	certFile := target.CertificateFile
 	if certFile == "" {
@@ -192,6 +208,12 @@ func (m *Monitor) listSnapshots(ctx context.Context, target store.Target) ([]res
 }
 
 func (m *Monitor) saveSnapshotFileList(ctx context.Context, target store.Target, snapshotID string) (int, error) {
+	// Mock mode: return fake file count without calling restic
+	if m.cfg.MockMode {
+		log.Printf("target %s: MOCK MODE - returning fake file count for snapshot %s", target.Name, snapshotID)
+		return 1234, nil
+	}
+
 	log.Printf("target %s: executing: %s ls %s --json", target.Name, m.cfg.ResticBinary, snapshotID)
 
 	// Create timeout context using configured timeout
@@ -336,6 +358,11 @@ func (m *Monitor) listSnapshotFiles(ctx context.Context, target store.Target, sn
 }
 
 func (m *Monitor) checkHealth(ctx context.Context, target store.Target) (bool, string) {
+	if m.cfg.MockMode {
+		log.Printf("target %s: MOCK MODE - skipping restic check", target.Name)
+		return true, "mock health check - repository is healthy"
+	}
+
 	log.Printf("target %s: executing: %s check --json", target.Name, m.cfg.ResticBinary)
 
 	// Create timeout context using configured timeout

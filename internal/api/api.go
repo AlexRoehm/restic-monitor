@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -170,6 +171,21 @@ func (a *API) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// handleStatus godoc
+// @Summary Get status of all backup targets
+// @Description Returns the current status of all configured backup targets including health, snapshot counts, and last check time
+// @Tags Status
+// @Accept json
+// @Produce json
+// @Param name query string false "Optional filter by target name"
+// @Success 200 {object} statusResponse "Single status when name parameter is provided"
+// @Success 200 {array} statusResponse "Array of statuses when no name parameter"
+// @Failure 401 {string} string "Unauthorized"
+// @Failure 404 {string} string "Target not found"
+// @Failure 500 {string} string "Internal server error"
+// @Security BasicAuth
+// @Security BearerAuth
+// @Router /status [get]
 func (a *API) handleStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	name := r.URL.Query().Get("name")
@@ -194,7 +210,7 @@ func (a *API) handleStatus(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(statusPayload(status, targetMap[status.Name]))
+		_ = json.NewEncoder(w).Encode(statusPayload(status, targetMap[status.Name], status.Health))
 		return
 	}
 
@@ -206,11 +222,27 @@ func (a *API) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	payloads := make([]statusResponse, 0, len(statuses))
 	for _, status := range statuses {
-		payloads = append(payloads, statusPayload(status, targetMap[status.Name]))
+		payloads = append(payloads, statusPayload(status, targetMap[status.Name], status.Health))
 	}
 	_ = json.NewEncoder(w).Encode(payloads)
 }
 
+// handleStatusByName godoc
+// @Summary Get status of a specific backup target
+// @Description Returns the current status of a single backup target by name. Optionally check if the latest snapshot is younger than a specified age.
+// @Tags Status
+// @Accept json
+// @Produce json
+// @Param name path string true "Name of the backup target"
+// @Param maxage query int false "Maximum age in hours for the latest snapshot. If specified, health status will be true only if repository is healthy AND snapshot is younger than maxage hours" minimum(1)
+// @Success 200 {object} statusResponse "Successful response with backup status"
+// @Failure 400 {string} string "Bad request - invalid maxage parameter"
+// @Failure 401 {string} string "Unauthorized"
+// @Failure 404 {string} string "Target not found"
+// @Failure 500 {string} string "Internal server error"
+// @Security BasicAuth
+// @Security BearerAuth
+// @Router /status/{name} [get]
 func (a *API) handleStatusByName(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	w.Header().Set("Content-Type", "application/json")
@@ -220,6 +252,17 @@ func (a *API) handleStatusByName(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		http.Error(w, "target name required", http.StatusBadRequest)
 		return
+	}
+
+	// Parse maxage query parameter (in hours)
+	var maxAgeHours int
+	if maxAgeStr := r.URL.Query().Get("maxage"); maxAgeStr != "" {
+		parsed, err := strconv.Atoi(maxAgeStr)
+		if err != nil || parsed <= 0 {
+			http.Error(w, "invalid maxage parameter, must be positive integer", http.StatusBadRequest)
+			return
+		}
+		maxAgeHours = parsed
 	}
 
 	// Get target to include disabled status
@@ -243,17 +286,25 @@ func (a *API) handleStatusByName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = json.NewEncoder(w).Encode(statusPayload(status, disabled))
+	// Check snapshot age if maxage is specified
+	healthWithAge := status.Health
+	if maxAgeHours > 0 {
+		maxAge := time.Duration(maxAgeHours) * time.Hour
+		age := time.Since(status.LatestBackup)
+		healthWithAge = status.Health && age <= maxAge
+	}
+
+	_ = json.NewEncoder(w).Encode(statusPayload(status, disabled, healthWithAge))
 }
 
-func statusPayload(status store.BackupStatus, disabled bool) statusResponse {
+func statusPayload(status store.BackupStatus, disabled bool, health bool) statusResponse {
 	return statusResponse{
 		Name:             status.Name,
 		LatestBackup:     status.LatestBackup,
 		LatestSnapshotID: status.LatestSnapshotID,
 		SnapshotCount:    status.SnapshotCount,
 		FileCount:        status.FileCount,
-		Health:           status.Health,
+		Health:           health,
 		StatusMessage:    status.StatusMessage,
 		CheckedAt:        status.CheckedAt,
 		Disabled:         disabled,
@@ -261,24 +312,47 @@ func statusPayload(status store.BackupStatus, disabled bool) statusResponse {
 }
 
 type statusResponse struct {
-	Name             string    `json:"name"`
-	LatestBackup     time.Time `json:"latestBackup"`
-	LatestSnapshotID string    `json:"latestSnapshotID"`
-	SnapshotCount    int       `json:"snapshotCount"`
-	FileCount        int       `json:"fileCount"`
-	Health           bool      `json:"health"`
-	StatusMessage    string    `json:"statusMessage"`
-	CheckedAt        time.Time `json:"checkedAt"`
-	Disabled         bool      `json:"disabled"`
+	Name             string    `json:"name" example:"home"`
+	LatestBackup     time.Time `json:"latestBackup" example:"2025-11-23T14:30:00Z"`
+	LatestSnapshotID string    `json:"latestSnapshotID" example:"a1b2c3d4"`
+	SnapshotCount    int       `json:"snapshotCount" example:"42"`
+	FileCount        int       `json:"fileCount" example:"1234"`
+	Health           bool      `json:"health" example:"true"`
+	StatusMessage    string    `json:"statusMessage" example:"restic check succeeded"`
+	CheckedAt        time.Time `json:"checkedAt" example:"2025-11-23T15:00:00Z"`
+	Disabled         bool      `json:"disabled" example:"false"`
+}
+
+type snapshotResponse struct {
+	ID       string    `json:"short_id" example:"a1b2c3d4"`
+	Time     time.Time `json:"time" example:"2025-11-23T14:30:00Z"`
+	Hostname string    `json:"hostname" example:"myserver"`
+	Username string    `json:"username" example:"admin"`
+	Paths    []string  `json:"paths"`
+	Tags     []string  `json:"tags"`
 }
 
 type fileResponse struct {
-	Path string `json:"path"`
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Size int64  `json:"size"`
+	Path string `json:"path" example:"/home/user/documents/file.txt"`
+	Name string `json:"name" example:"file.txt"`
+	Type string `json:"type" example:"file"`
+	Size int64  `json:"size" example:"2048"`
 }
 
+// handleSnapshots godoc
+// @Summary Get snapshots for a specific backup target
+// @Description Returns list of all snapshots for the specified backup target
+// @Tags Snapshots
+// @Accept json
+// @Produce json
+// @Param name path string true "Name of the backup target"
+// @Success 200 {array} snapshotResponse "List of snapshots"
+// @Failure 401 {string} string "Unauthorized"
+// @Failure 404 {string} string "Target not found"
+// @Failure 500 {string} string "Internal server error"
+// @Security BasicAuth
+// @Security BearerAuth
+// @Router /snapshots/{name} [get]
 func (a *API) handleSnapshots(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	w.Header().Set("Content-Type", "application/json")
@@ -332,6 +406,20 @@ func (a *API) handleSnapshots(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(snapshots)
 }
 
+// handleSnapshotFiles godoc
+// @Summary Get file list for a specific snapshot
+// @Description Returns the list of files contained in the specified snapshot
+// @Tags Snapshots
+// @Accept json
+// @Produce json
+// @Param id path string true "Snapshot ID"
+// @Success 200 {array} fileResponse "List of files"
+// @Failure 401 {string} string "Unauthorized"
+// @Failure 404 {string} string "Snapshot file list not found"
+// @Failure 500 {string} string "Internal server error"
+// @Security BasicAuth
+// @Security BearerAuth
+// @Router /snapshot/{id} [get]
 func (a *API) handleSnapshotFiles(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -371,6 +459,21 @@ func (a *API) handleSnapshotFiles(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(files)
 }
 
+// handleUnlock godoc
+// @Summary Unlock a repository
+// @Description Removes stale locks from a Restic repository
+// @Tags Maintenance
+// @Accept json
+// @Produce json
+// @Param name path string true "Name of the backup target"
+// @Success 200 {object} map[string]string "Repository unlocked successfully"
+// @Failure 400 {string} string "Bad request"
+// @Failure 401 {string} string "Unauthorized"
+// @Failure 404 {string} string "Target not found"
+// @Failure 500 {string} string "Unlock failed"
+// @Security BasicAuth
+// @Security BearerAuth
+// @Router /unlock/{name} [post]
 func (a *API) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -406,18 +509,25 @@ func (a *API) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Run restic unlock
-	log.Printf("unlocking repository for target %s", name)
-	cmd := exec.CommandContext(ctx, a.config.ResticBinary, "unlock")
-	cmd.Env = append(os.Environ(), a.envForTarget(*target)...)
+	var unlockOutput string
+	if a.config.MockMode {
+		log.Printf("MOCK MODE - skipping restic unlock for target %s", name)
+		unlockOutput = "mock unlock successful"
+	} else {
+		log.Printf("unlocking repository for target %s", name)
+		cmd := exec.CommandContext(ctx, a.config.ResticBinary, "unlock")
+		cmd.Env = append(os.Environ(), a.envForTarget(*target)...)
 
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Printf("unlock failed for %s: %v, output: %s", name, err, string(out))
-		http.Error(w, fmt.Sprintf("unlock failed: %v\\n%s", err, string(out)), http.StatusInternalServerError)
-		return
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Printf("unlock failed for %s: %v, output: %s", name, err, string(out))
+			http.Error(w, fmt.Sprintf("unlock failed: %v\\n%s", err, string(out)), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("successfully unlocked repository for target %s", name)
+		unlockOutput = strings.TrimSpace(string(out))
 	}
-
-	log.Printf("successfully unlocked repository for target %s", name)
 
 	// Trigger immediate re-check of the repository
 	a.monitor.TriggerCheck(name)
@@ -426,10 +536,25 @@ func (a *API) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status":  "unlocked",
 		"target":  name,
-		"message": strings.TrimSpace(string(out)),
+		"message": unlockOutput,
 	})
 }
 
+// handlePrune godoc
+// @Summary Prune snapshots for a target or all targets
+// @Description Applies retention policy (restic forget) to remove old snapshots. Use "all" as the name to prune all targets.
+// @Tags Maintenance
+// @Accept json
+// @Produce json
+// @Param name path string true "Name of the backup target or 'all' for all targets"
+// @Success 200 {object} map[string]interface{} "Prune operation completed successfully"
+// @Failure 400 {string} string "Bad request"
+// @Failure 401 {string} string "Unauthorized"
+// @Failure 404 {string} string "Target not found"
+// @Failure 500 {string} string "Prune operation failed"
+// @Security BasicAuth
+// @Security BearerAuth
+// @Router /prune/{name} [post]
 func (a *API) handlePrune(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -513,35 +638,39 @@ func (a *API) pruneTarget(ctx context.Context, target store.Target) error {
 	}
 
 	// Execute restic forget with prune policy
-	timeoutCtx, cancel := context.WithTimeout(ctx, a.config.ResticTimeout*3) // Prune can take longer
-	defer cancel()
+	if a.config.MockMode {
+		log.Printf("MOCK MODE - skipping restic forget for target %s", target.Name)
+	} else {
+		timeoutCtx, cancel := context.WithTimeout(ctx, a.config.ResticTimeout*3) // Prune can take longer
+		defer cancel()
 
-	args := []string{"forget", "--verbose"}
+		args := []string{"forget", "--verbose"}
 
-	// Add retention policy flags
-	if target.KeepLast > 0 {
-		args = append(args, "--keep-last", fmt.Sprintf("%d", target.KeepLast))
-	}
-	if target.KeepDaily > 0 {
-		args = append(args, "--keep-daily", fmt.Sprintf("%d", target.KeepDaily))
-	}
-	if target.KeepWeekly > 0 {
-		args = append(args, "--keep-weekly", fmt.Sprintf("%d", target.KeepWeekly))
-	}
-	if target.KeepMonthly > 0 {
-		args = append(args, "--keep-monthly", fmt.Sprintf("%d", target.KeepMonthly))
-	}
+		// Add retention policy flags
+		if target.KeepLast > 0 {
+			args = append(args, "--keep-last", fmt.Sprintf("%d", target.KeepLast))
+		}
+		if target.KeepDaily > 0 {
+			args = append(args, "--keep-daily", fmt.Sprintf("%d", target.KeepDaily))
+		}
+		if target.KeepWeekly > 0 {
+			args = append(args, "--keep-weekly", fmt.Sprintf("%d", target.KeepWeekly))
+		}
+		if target.KeepMonthly > 0 {
+			args = append(args, "--keep-monthly", fmt.Sprintf("%d", target.KeepMonthly))
+		}
 
-	cmd := exec.CommandContext(timeoutCtx, a.config.ResticBinary, args...)
-	cmd.Env = append(os.Environ(), a.envForTarget(target)...)
+		cmd := exec.CommandContext(timeoutCtx, a.config.ResticBinary, args...)
+		cmd.Env = append(os.Environ(), a.envForTarget(target)...)
 
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Printf("forget failed for %s: %v, output: %s", target.Name, err, string(out))
-		return fmt.Errorf("restic forget: %w", err)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Printf("forget failed for %s: %v, output: %s", target.Name, err, string(out))
+			return fmt.Errorf("restic forget: %w", err)
+		}
+
+		log.Printf("forget completed for %s, output: %s", target.Name, string(out))
 	}
-
-	log.Printf("forget completed for %s, output: %s", target.Name, string(out))
 
 	// Get snapshot IDs after pruning
 	snapshotsAfter, err := a.getSnapshotIDs(ctx, target)
@@ -624,6 +753,21 @@ func (a *API) getSnapshotIDs(ctx context.Context, target store.Target) ([]string
 	return ids, nil
 }
 
+// handleToggleDisabled godoc
+// @Summary Enable or disable monitoring for a target
+// @Description Toggles the disabled state of a backup target
+// @Tags Configuration
+// @Accept json
+// @Produce json
+// @Param name path string true "Name of the backup target"
+// @Success 200 {object} map[string]interface{} "Target state toggled successfully"
+// @Failure 400 {string} string "Bad request"
+// @Failure 401 {string} string "Unauthorized"
+// @Failure 404 {string} string "Target not found"
+// @Failure 500 {string} string "Internal server error"
+// @Security BasicAuth
+// @Security BearerAuth
+// @Router /toggle/{name} [post]
 func (a *API) handleToggleDisabled(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
