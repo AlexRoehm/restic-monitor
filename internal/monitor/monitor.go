@@ -360,6 +360,10 @@ func (m *Monitor) listSnapshotFiles(ctx context.Context, target store.Target, sn
 func (m *Monitor) checkHealth(ctx context.Context, target store.Target) (bool, string) {
 	if m.cfg.MockMode {
 		log.Printf("target %s: MOCK MODE - skipping restic check", target.Name)
+		// Make one specific target unhealthy in mock mode
+		if target.Name == "bitwarden" {
+			return false, "mock error: pack 3f4a8b2c is corrupted - data integrity check failed"
+		}
 		return true, "mock health check - repository is healthy"
 	}
 

@@ -135,7 +135,11 @@
       </div>
 
       <!-- Backup Cards Grid -->
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+      <TransitionGroup 
+        v-if="filteredBackups.length > 0"
+        name="backup-list" 
+        tag="div" 
+        class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
         <div v-for="backup in filteredBackups" :key="backup.name" 
              class="card bg-base-100 shadow-xl hover:shadow-2xl transition-all duration-300 border border-base-300">
           <div class="card-body">
@@ -245,7 +249,7 @@
             </div>
           </div>
         </div>
-      </div>
+      </TransitionGroup>
     </div>
 
     <!-- Footer -->
@@ -493,7 +497,11 @@ const filteredFiles = computed(() => {
 })
 
 const fetchBackups = async () => {
-  loading.value = true
+  // Only show loading spinner on first load, not on refresh
+  const isFirstLoad = backups.value.length === 0
+  if (isFirstLoad) {
+    loading.value = true
+  }
   error.value = null
   try {
     const response = await fetch(`${API_BASE}/status`, {
@@ -512,11 +520,48 @@ const fetchBackups = async () => {
     
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const data = await response.json()
-    backups.value = Array.isArray(data) ? data : [data]
+    const newBackups = Array.isArray(data) ? data : [data]
+    
+    // Sort by name to maintain consistent order
+    newBackups.sort((a, b) => a.name.localeCompare(b.name))
+    
+    // Update existing backups in place instead of replacing the array
+    if (backups.value.length === 0) {
+      // First load - just assign
+      backups.value = newBackups
+    } else {
+      // Create a map of existing backups for quick lookup
+      const existingMap = new Map(backups.value.map(b => [b.name, b]))
+      const newMap = new Map(newBackups.map(b => [b.name, b]))
+      
+      // Update existing entries
+      backups.value.forEach((backup, index) => {
+        const updated = newMap.get(backup.name)
+        if (updated) {
+          // Update properties individually to maintain reactivity
+          Object.assign(backups.value[index], updated)
+        }
+      })
+      
+      // Remove backups that no longer exist
+      backups.value = backups.value.filter(b => newMap.has(b.name))
+      
+      // Add new backups at the end (sorted position will be handled by computed)
+      newBackups.forEach(newBackup => {
+        if (!existingMap.has(newBackup.name)) {
+          backups.value.push(newBackup)
+        }
+      })
+      
+      // Re-sort to maintain order
+      backups.value.sort((a, b) => a.name.localeCompare(b.name))
+    }
   } catch (err) {
     error.value = err.message
   } finally {
-    loading.value = false
+    if (isFirstLoad) {
+      loading.value = false
+    }
   }
 }
 
@@ -767,3 +812,30 @@ onMounted(() => {
   setInterval(fetchBackups, 30000)
 })
 </script>
+
+<style scoped>
+/* Transition for backup cards */
+.backup-list-enter-active {
+  transition: all 0.5s ease;
+}
+
+.backup-list-leave-active {
+  transition: all 0.5s ease;
+  position: absolute;
+  width: calc(100% - 1.5rem);
+}
+
+.backup-list-enter-from {
+  opacity: 0;
+  transform: translateY(-30px) scale(0.95);
+}
+
+.backup-list-leave-to {
+  opacity: 0;
+  transform: translateY(30px) scale(0.95);
+}
+
+.backup-list-move {
+  transition: transform 0.5s ease;
+}
+</style>
