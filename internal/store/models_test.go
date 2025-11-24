@@ -45,10 +45,10 @@ func TestModelFieldsExist(t *testing.T) {
 			name:  "Policy",
 			model: store.Policy{},
 			requiredFields: []string{
-				"ID", "TenantID", "Name", "Schedule", "IncludePaths",
+				"ID", "TenantID", "Name", "Description", "Schedule", "IncludePaths",
 				"ExcludePaths", "RepositoryURL", "RepositoryType",
-				"RepositoryConfig", "RetentionRules", "Enabled",
-				"CreatedAt", "UpdatedAt",
+				"RepositoryConfig", "RetentionRules", "BandwidthLimitKBps",
+				"ParallelFiles", "Enabled", "CreatedAt", "UpdatedAt",
 			},
 		},
 		{
@@ -127,10 +127,11 @@ func TestModelSerialization(t *testing.T) {
 		{
 			name: "Policy",
 			model: &store.Policy{
-				ID:       policyID,
-				TenantID: tenantID,
-				Name:     "Daily Production Backup",
-				Schedule: "0 2 * * *",
+				ID:          policyID,
+				TenantID:    tenantID,
+				Name:        "Daily Production Backup",
+				Description: stringPtr("Daily backup of production data to S3"),
+				Schedule:    "0 2 * * *",
 				IncludePaths: store.JSONB{
 					"paths": []string{"/home", "/etc"},
 				},
@@ -148,9 +149,11 @@ func TestModelSerialization(t *testing.T) {
 					"keep_weekly":  4,
 					"keep_monthly": 12,
 				},
-				Enabled:   true,
-				CreatedAt: now,
-				UpdatedAt: now,
+				BandwidthLimitKBps: intPtr(10240),
+				ParallelFiles:      intPtr(4),
+				Enabled:            true,
+				CreatedAt:          now,
+				UpdatedAt:          now,
 			},
 		},
 		{
@@ -359,6 +362,65 @@ func TestModelCRUD(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, policy.Name, retrieved.Name)
 		assert.Equal(t, float64(7), retrieved.RetentionRules["keep_daily"])
+	})
+
+	t.Run("Policy with Optional Fields", func(t *testing.T) {
+		description := "Production backup with bandwidth limits"
+		policy := store.Policy{
+			TenantID:           tenantID,
+			Name:               "Limited Policy",
+			Description:        &description,
+			Schedule:           "0 3 * * *",
+			IncludePaths:       store.JSONB{"paths": []string{"/var/www"}},
+			RepositoryURL:      "s3:bucket/limited",
+			RepositoryType:     "s3",
+			RetentionRules:     store.JSONB{"keep_daily": 14},
+			BandwidthLimitKBps: intPtr(5120),
+			ParallelFiles:      intPtr(2),
+			Enabled:            true,
+		}
+
+		err := db.Create(&policy).Error
+		require.NoError(t, err)
+
+		var retrieved store.Policy
+		err = db.First(&retrieved, "id = ?", policy.ID).Error
+		require.NoError(t, err)
+		assert.NotNil(t, retrieved.Description)
+		assert.Equal(t, description, *retrieved.Description)
+		assert.NotNil(t, retrieved.BandwidthLimitKBps)
+		assert.Equal(t, 5120, *retrieved.BandwidthLimitKBps)
+		assert.NotNil(t, retrieved.ParallelFiles)
+		assert.Equal(t, 2, *retrieved.ParallelFiles)
+	})
+
+	t.Run("Policy Name Uniqueness", func(t *testing.T) {
+		policy1 := store.Policy{
+			TenantID:       tenantID,
+			Name:           "Unique Policy Name",
+			Schedule:       "0 2 * * *",
+			IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+			RepositoryURL:  "s3:bucket/path",
+			RepositoryType: "s3",
+			RetentionRules: store.JSONB{"keep_daily": 7},
+			Enabled:        true,
+		}
+		err := db.Create(&policy1).Error
+		require.NoError(t, err)
+
+		// Attempt to create another policy with the same name and tenant
+		policy2 := store.Policy{
+			TenantID:       tenantID,
+			Name:           "Unique Policy Name",
+			Schedule:       "0 3 * * *",
+			IncludePaths:   store.JSONB{"paths": []string{"/other"}},
+			RepositoryURL:  "s3:bucket/other",
+			RepositoryType: "s3",
+			RetentionRules: store.JSONB{"keep_daily": 7},
+			Enabled:        true,
+		}
+		err = db.Create(&policy2).Error
+		assert.Error(t, err, "Should fail due to unique constraint on name+tenant_id")
 	})
 
 	t.Run("BackupRun CRUD", func(t *testing.T) {

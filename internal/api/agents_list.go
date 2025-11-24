@@ -22,6 +22,12 @@ func (a *API) handleAgentsRouter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// /agents/{id}/policies -> policies handler
+	if len(parts) == 3 && parts[0] == "agents" && parts[2] == "policies" && r.Method == http.MethodGet {
+		a.handleGetAgentPolicies(w, r)
+		return
+	}
+
 	// /agents/{id} -> GET handler
 	if len(parts) == 2 && parts[0] == "agents" && r.Method == http.MethodGet {
 		a.handleGetAgents(w, r)

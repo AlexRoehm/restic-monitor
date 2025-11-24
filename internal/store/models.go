@@ -42,19 +42,22 @@ func (a *Agent) BeforeCreate(tx *gorm.DB) error {
 
 // Policy represents a backup policy with schedule and retention rules
 type Policy struct {
-	ID               uuid.UUID `gorm:"primaryKey" json:"id"`
-	TenantID         uuid.UUID `gorm:"not null;index" json:"tenant_id"`
-	Name             string    `gorm:"type:varchar(255);not null" json:"name"`
-	Schedule         string    `gorm:"type:varchar(255);not null" json:"schedule"` // cron expression
-	IncludePaths     JSONB     `gorm:"serializer:json;not null" json:"include_paths"`
-	ExcludePaths     JSONB     `gorm:"serializer:json" json:"exclude_paths,omitempty"`
-	RepositoryURL    string    `gorm:"type:text;not null" json:"repository_url"`
-	RepositoryType   string    `gorm:"type:varchar(50);not null" json:"repository_type"` // s3, sftp, local, rest
-	RepositoryConfig JSONB     `gorm:"serializer:json" json:"repository_config,omitempty"`
-	RetentionRules   JSONB     `gorm:"serializer:json;not null" json:"retention_rules"`
-	Enabled          bool      `gorm:"not null;default:true" json:"enabled"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID                 uuid.UUID `gorm:"primaryKey" json:"id"`
+	TenantID           uuid.UUID `gorm:"not null;index;uniqueIndex:idx_policy_name_tenant" json:"tenant_id"`
+	Name               string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_policy_name_tenant" json:"name"`
+	Description        *string   `gorm:"type:varchar(500)" json:"description,omitempty"`
+	Schedule           string    `gorm:"type:varchar(255);not null" json:"schedule"` // cron expression
+	IncludePaths       JSONB     `gorm:"serializer:json;not null" json:"include_paths"`
+	ExcludePaths       JSONB     `gorm:"serializer:json" json:"exclude_paths,omitempty"`
+	RepositoryURL      string    `gorm:"type:text;not null" json:"repository_url"`
+	RepositoryType     string    `gorm:"type:varchar(50);not null" json:"repository_type"` // s3, sftp, local, rest
+	RepositoryConfig   JSONB     `gorm:"serializer:json" json:"repository_config,omitempty"`
+	RetentionRules     JSONB     `gorm:"serializer:json;not null" json:"retention_rules"`
+	BandwidthLimitKBps *int      `json:"bandwidth_limit_kbps,omitempty"`
+	ParallelFiles      *int      `json:"parallel_files,omitempty"`
+	Enabled            bool      `gorm:"not null;default:true" json:"enabled"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // TableName specifies the table name for Policy

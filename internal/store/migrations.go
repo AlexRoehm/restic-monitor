@@ -107,6 +107,7 @@ func GetAllMigrations(defaultTenantID uuid.UUID) []Migration {
 	return []Migration{
 		GetMigration001CreateAgentTables(defaultTenantID),
 		GetMigration002AddHeartbeatFields(),
+		GetMigration003AddPolicyFields(),
 	}
 }
 
@@ -226,6 +227,22 @@ func GetMigration002AddHeartbeatFields() Migration {
 			// GORM AutoMigrate handles adding new columns gracefully
 			if err := tx.AutoMigrate(&Agent{}); err != nil {
 				return fmt.Errorf("adding heartbeat fields to agents: %w", err)
+			}
+			return nil
+		},
+	}
+}
+
+// GetMigration003AddPolicyFields adds new fields to policies table
+func GetMigration003AddPolicyFields() Migration {
+	return Migration{
+		Version:     "003",
+		Description: "Add description, bandwidth_limit_kbps, and parallel_files to policies table; add unique constraint on name+tenant_id",
+		Up: func(tx *gorm.DB) error {
+			// Add new columns to policies table
+			// GORM AutoMigrate handles adding new columns gracefully
+			if err := tx.AutoMigrate(&Policy{}); err != nil {
+				return fmt.Errorf("adding new fields to policies: %w", err)
 			}
 			return nil
 		},

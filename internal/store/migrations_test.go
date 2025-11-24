@@ -14,6 +14,11 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// Helper function for int pointer (duplicated from models_test.go)
+func intPtrMigration(i int) *int {
+	return &i
+}
+
 // TestMigrationRunner tests the migration runner (TDD)
 func TestMigrationRunner(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
@@ -242,4 +247,134 @@ func TestGetAllMigrations(t *testing.T) {
 		assert.Greater(t, migrations[i].Version, migrations[i-1].Version,
 			"Migrations should be in version order")
 	}
+
+	// Verify we have all expected migrations
+	assert.GreaterOrEqual(t, len(migrations), 3, "Should have at least 3 migrations")
+}
+
+// TestMigration003PolicyFields tests the policy fields migration
+func TestMigration003PolicyFields(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	t.Run("Add new policy fields", func(t *testing.T) {
+		// Create v1 schema first (migration 001)
+		tenantID := uuid.New()
+		runner := store.NewMigrationRunner(db)
+		err := runner.Initialize(ctx)
+		require.NoError(t, err)
+
+		migration001 := store.GetMigration001CreateAgentTables(tenantID)
+		err = runner.Run(ctx, migration001)
+		require.NoError(t, err)
+
+		// Create a policy with old schema (before migration 003)
+		oldPolicy := store.Policy{
+			TenantID:       tenantID,
+			Name:           "old-policy",
+			Schedule:       "0 2 * * *",
+			IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+			RepositoryURL:  "s3:bucket/path",
+			RepositoryType: "s3",
+			RetentionRules: store.JSONB{"keep_daily": 7},
+			Enabled:        true,
+		}
+		err = db.Create(&oldPolicy).Error
+		require.NoError(t, err)
+
+		// Run migration 003
+		migration003 := store.GetMigration003AddPolicyFields()
+		err = runner.Run(ctx, migration003)
+		require.NoError(t, err)
+
+		// Create a new policy with new fields
+		description := "Test policy with bandwidth limits"
+		newPolicy := store.Policy{
+			TenantID:           tenantID,
+			Name:               "new-policy",
+			Description:        &description,
+			Schedule:           "0 3 * * *",
+			IncludePaths:       store.JSONB{"paths": []string{"/var"}},
+			RepositoryURL:      "s3:bucket/new",
+			RepositoryType:     "s3",
+			RetentionRules:     store.JSONB{"keep_daily": 14},
+			BandwidthLimitKBps: intPtrMigration(5120),
+			ParallelFiles:      intPtrMigration(2),
+			Enabled:            true,
+		}
+		err = db.Create(&newPolicy).Error
+		require.NoError(t, err)
+
+		// Verify new fields are persisted
+		var retrieved store.Policy
+		err = db.First(&retrieved, "id = ?", newPolicy.ID).Error
+		require.NoError(t, err)
+		assert.NotNil(t, retrieved.Description)
+		assert.Equal(t, description, *retrieved.Description)
+		assert.NotNil(t, retrieved.BandwidthLimitKBps)
+		assert.Equal(t, 5120, *retrieved.BandwidthLimitKBps)
+		assert.NotNil(t, retrieved.ParallelFiles)
+		assert.Equal(t, 2, *retrieved.ParallelFiles)
+
+		// Verify old policy still exists
+		var oldRetrieved store.Policy
+		err = db.First(&oldRetrieved, "id = ?", oldPolicy.ID).Error
+		require.NoError(t, err)
+		assert.Nil(t, oldRetrieved.Description)
+		assert.Nil(t, oldRetrieved.BandwidthLimitKBps)
+		assert.Nil(t, oldRetrieved.ParallelFiles)
+	})
+
+	t.Run("Name uniqueness constraint", func(t *testing.T) {
+		// Create a fresh database for this test
+		db, _ := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+			Logger: logger.Default.LogMode(logger.Silent),
+		})
+
+		ctx := context.Background()
+		tenantID := uuid.New()
+		runner := store.NewMigrationRunner(db)
+		err := runner.Initialize(ctx)
+		require.NoError(t, err)
+
+		// Run migrations
+		migrations := []store.Migration{
+			store.GetMigration001CreateAgentTables(tenantID),
+			store.GetMigration003AddPolicyFields(),
+		}
+		err = runner.RunAll(ctx, migrations)
+		require.NoError(t, err)
+
+		// Create first policy
+		policy1 := store.Policy{
+			TenantID:       tenantID,
+			Name:           "unique-name",
+			Schedule:       "0 2 * * *",
+			IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+			RepositoryURL:  "s3:bucket/path",
+			RepositoryType: "s3",
+			RetentionRules: store.JSONB{"keep_daily": 7},
+			Enabled:        true,
+		}
+		err = db.Create(&policy1).Error
+		require.NoError(t, err)
+
+		// Try to create second policy with same name
+		policy2 := store.Policy{
+			TenantID:       tenantID,
+			Name:           "unique-name",
+			Schedule:       "0 3 * * *",
+			IncludePaths:   store.JSONB{"paths": []string{"/other"}},
+			RepositoryURL:  "s3:bucket/other",
+			RepositoryType: "s3",
+			RetentionRules: store.JSONB{"keep_daily": 7},
+			Enabled:        true,
+		}
+		err = db.Create(&policy2).Error
+		assert.Error(t, err, "Should fail due to unique constraint")
+	})
 }

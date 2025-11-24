@@ -60,6 +60,10 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/agents/", a.handleAgentsRouter) // Routes to GET or heartbeat handler
 	mux.HandleFunc("/agents", a.handleGetAgents)     // GET /agents (list)
 
+	// Policy API routes
+	mux.HandleFunc("/policies/", a.handlePolicies) // Handles GET/PUT/DELETE for /policies/{id}
+	mux.HandleFunc("/policies", a.handlePolicies)  // Handles POST/GET for /policies
+
 	// API routes under /api/v1/
 	mux.HandleFunc("/api/v1/status", a.handleStatus)
 	mux.HandleFunc("/api/v1/status/", a.handleStatusByName)
@@ -141,7 +145,9 @@ func (a *API) authMiddleware(next http.Handler) http.Handler {
 		// Only require auth for API routes and agent routes
 		requiresAuth := strings.HasPrefix(r.URL.Path, "/api/") ||
 			strings.HasPrefix(r.URL.Path, "/agents/") ||
-			r.URL.Path == "/agents"
+			r.URL.Path == "/agents" ||
+			strings.HasPrefix(r.URL.Path, "/policies/") ||
+			r.URL.Path == "/policies"
 		if !requiresAuth {
 			next.ServeHTTP(w, r)
 			return
