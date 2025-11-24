@@ -518,6 +518,390 @@ func TestModelCRUD(t *testing.T) {
 	})
 }
 
+// TestAgentPolicyLinkDuplicatePrevention tests that duplicate assignments are prevented (TDD - Epic 7)
+func TestAgentPolicyLinkDuplicatePrevention(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+	err = store.MigrateModels(db)
+	require.NoError(t, err)
+
+	tenantID := uuid.New()
+
+	// Create agent and policy
+	agent := store.Agent{
+		TenantID: tenantID,
+		Hostname: "test-agent",
+		OS:       "linux",
+		Arch:     "amd64",
+		Version:  "1.0.0",
+		Status:   "online",
+	}
+	err = db.Create(&agent).Error
+	require.NoError(t, err)
+
+	policy := store.Policy{
+		TenantID:       tenantID,
+		Name:           "Test Policy",
+		Schedule:       "0 2 * * *",
+		IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+		RepositoryURL:  "s3:bucket/path",
+		RepositoryType: "s3",
+		RetentionRules: store.JSONB{"keep_daily": 7},
+		Enabled:        true,
+	}
+	err = db.Create(&policy).Error
+	require.NoError(t, err)
+
+	// Create first assignment
+	link1 := store.AgentPolicyLink{
+		AgentID:  agent.ID,
+		PolicyID: policy.ID,
+	}
+	err = db.Create(&link1).Error
+	require.NoError(t, err, "First assignment should succeed")
+
+	// Attempt duplicate assignment
+	link2 := store.AgentPolicyLink{
+		AgentID:  agent.ID,
+		PolicyID: policy.ID,
+	}
+	err = db.Create(&link2).Error
+	assert.Error(t, err, "Duplicate assignment should fail due to composite primary key")
+
+	// Verify only one link exists
+	var count int64
+	db.Model(&store.AgentPolicyLink{}).Where("agent_id = ? AND policy_id = ?", agent.ID, policy.ID).Count(&count)
+	assert.Equal(t, int64(1), count, "Only one link should exist")
+}
+
+// TestAgentPolicyLinkCascadeDeleteAgent tests cascade delete when agent is deleted (TDD - Epic 7)
+func TestAgentPolicyLinkCascadeDeleteAgent(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+
+	// Enable foreign key constraints for SQLite
+	db.Exec("PRAGMA foreign_keys = ON")
+
+	err = store.MigrateModels(db)
+	require.NoError(t, err)
+
+	tenantID := uuid.New()
+
+	// Create agent
+	agent := store.Agent{
+		TenantID: tenantID,
+		Hostname: "cascade-test-agent",
+		OS:       "linux",
+		Arch:     "amd64",
+		Version:  "1.0.0",
+		Status:   "online",
+	}
+	err = db.Create(&agent).Error
+	require.NoError(t, err)
+
+	// Create two policies
+	policy1 := store.Policy{
+		TenantID:       tenantID,
+		Name:           "Policy One",
+		Schedule:       "0 2 * * *",
+		IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+		RepositoryURL:  "s3:bucket/path1",
+		RepositoryType: "s3",
+		RetentionRules: store.JSONB{"keep_daily": 7},
+		Enabled:        true,
+	}
+	err = db.Create(&policy1).Error
+	require.NoError(t, err)
+
+	policy2 := store.Policy{
+		TenantID:       tenantID,
+		Name:           "Policy Two",
+		Schedule:       "0 3 * * *",
+		IncludePaths:   store.JSONB{"paths": []string{"/home"}},
+		RepositoryURL:  "s3:bucket/path2",
+		RepositoryType: "s3",
+		RetentionRules: store.JSONB{"keep_daily": 7},
+		Enabled:        true,
+	}
+	err = db.Create(&policy2).Error
+	require.NoError(t, err)
+
+	// Create two assignments
+	link1 := store.AgentPolicyLink{AgentID: agent.ID, PolicyID: policy1.ID}
+	err = db.Create(&link1).Error
+	require.NoError(t, err)
+
+	link2 := store.AgentPolicyLink{AgentID: agent.ID, PolicyID: policy2.ID}
+	err = db.Create(&link2).Error
+	require.NoError(t, err)
+
+	// Verify assignments exist
+	var countBefore int64
+	db.Model(&store.AgentPolicyLink{}).Where("agent_id = ?", agent.ID).Count(&countBefore)
+	assert.Equal(t, int64(2), countBefore, "Two assignments should exist before deletion")
+
+	// Delete agent
+	err = db.Delete(&agent).Error
+	require.NoError(t, err)
+
+	// Verify assignments were cascade-deleted
+	var countAfter int64
+	db.Model(&store.AgentPolicyLink{}).Where("agent_id = ?", agent.ID).Count(&countAfter)
+	assert.Equal(t, int64(0), countAfter, "All assignments should be cascade-deleted when agent is deleted")
+
+	// Verify policies still exist
+	var policy1Retrieved store.Policy
+	err = db.First(&policy1Retrieved, "id = ?", policy1.ID).Error
+	assert.NoError(t, err, "Policies should not be deleted when agent is deleted")
+}
+
+// TestAgentPolicyLinkCascadeDeletePolicy tests cascade delete when policy is deleted (TDD - Epic 7)
+func TestAgentPolicyLinkCascadeDeletePolicy(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+
+	// Enable foreign key constraints for SQLite
+	db.Exec("PRAGMA foreign_keys = ON")
+
+	err = store.MigrateModels(db)
+	require.NoError(t, err)
+
+	tenantID := uuid.New()
+
+	// Create two agents
+	agent1 := store.Agent{
+		TenantID: tenantID,
+		Hostname: "agent-one",
+		OS:       "linux",
+		Arch:     "amd64",
+		Version:  "1.0.0",
+		Status:   "online",
+	}
+	err = db.Create(&agent1).Error
+	require.NoError(t, err)
+
+	agent2 := store.Agent{
+		TenantID: tenantID,
+		Hostname: "agent-two",
+		OS:       "linux",
+		Arch:     "amd64",
+		Version:  "1.0.0",
+		Status:   "online",
+	}
+	err = db.Create(&agent2).Error
+	require.NoError(t, err)
+
+	// Create policy
+	policy := store.Policy{
+		TenantID:       tenantID,
+		Name:           "Cascade Policy",
+		Schedule:       "0 2 * * *",
+		IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+		RepositoryURL:  "s3:bucket/path",
+		RepositoryType: "s3",
+		RetentionRules: store.JSONB{"keep_daily": 7},
+		Enabled:        true,
+	}
+	err = db.Create(&policy).Error
+	require.NoError(t, err)
+
+	// Create two assignments
+	link1 := store.AgentPolicyLink{AgentID: agent1.ID, PolicyID: policy.ID}
+	err = db.Create(&link1).Error
+	require.NoError(t, err)
+
+	link2 := store.AgentPolicyLink{AgentID: agent2.ID, PolicyID: policy.ID}
+	err = db.Create(&link2).Error
+	require.NoError(t, err)
+
+	// Verify assignments exist
+	var countBefore int64
+	db.Model(&store.AgentPolicyLink{}).Where("policy_id = ?", policy.ID).Count(&countBefore)
+	assert.Equal(t, int64(2), countBefore, "Two assignments should exist before deletion")
+
+	// Delete policy
+	err = db.Delete(&policy).Error
+	require.NoError(t, err)
+
+	// Verify assignments were cascade-deleted
+	var countAfter int64
+	db.Model(&store.AgentPolicyLink{}).Where("policy_id = ?", policy.ID).Count(&countAfter)
+	assert.Equal(t, int64(0), countAfter, "All assignments should be cascade-deleted when policy is deleted")
+
+	// Verify agents still exist
+	var agent1Retrieved store.Agent
+	err = db.First(&agent1Retrieved, "id = ?", agent1.ID).Error
+	assert.NoError(t, err, "Agents should not be deleted when policy is deleted")
+}
+
+// TestAgentPolicyLinkForeignKeyEnforcement tests foreign key constraints (TDD - Epic 7)
+func TestAgentPolicyLinkForeignKeyEnforcement(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+
+	// Enable foreign key constraints for SQLite
+	db.Exec("PRAGMA foreign_keys = ON")
+
+	err = store.MigrateModels(db)
+	require.NoError(t, err)
+
+	t.Run("Cannot assign non-existent policy", func(t *testing.T) {
+		tenantID := uuid.New()
+
+		agent := store.Agent{
+			TenantID: tenantID,
+			Hostname: "fk-test-agent",
+			OS:       "linux",
+			Arch:     "amd64",
+			Version:  "1.0.0",
+			Status:   "online",
+		}
+		err := db.Create(&agent).Error
+		require.NoError(t, err)
+
+		// Attempt to link to non-existent policy
+		nonExistentPolicyID := uuid.New()
+		link := store.AgentPolicyLink{
+			AgentID:  agent.ID,
+			PolicyID: nonExistentPolicyID,
+		}
+		err = db.Create(&link).Error
+		assert.Error(t, err, "Should fail due to foreign key constraint on policy_id")
+	})
+
+	t.Run("Cannot assign to non-existent agent", func(t *testing.T) {
+		tenantID := uuid.New()
+
+		policy := store.Policy{
+			TenantID:       tenantID,
+			Name:           "FK Test Policy",
+			Schedule:       "0 2 * * *",
+			IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+			RepositoryURL:  "s3:bucket/path",
+			RepositoryType: "s3",
+			RetentionRules: store.JSONB{"keep_daily": 7},
+			Enabled:        true,
+		}
+		err := db.Create(&policy).Error
+		require.NoError(t, err)
+
+		// Attempt to link to non-existent agent
+		nonExistentAgentID := uuid.New()
+		link := store.AgentPolicyLink{
+			AgentID:  nonExistentAgentID,
+			PolicyID: policy.ID,
+		}
+		err = db.Create(&link).Error
+		assert.Error(t, err, "Should fail due to foreign key constraint on agent_id")
+	})
+}
+
+// TestAgentPolicyLinkMultipleAssignments tests many-to-many relationship (TDD - Epic 7)
+func TestAgentPolicyLinkMultipleAssignments(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+	err = store.MigrateModels(db)
+	require.NoError(t, err)
+
+	tenantID := uuid.New()
+
+	t.Run("One agent can have multiple policies", func(t *testing.T) {
+		agent := store.Agent{
+			TenantID: tenantID,
+			Hostname: "multi-policy-agent",
+			OS:       "linux",
+			Arch:     "amd64",
+			Version:  "1.0.0",
+			Status:   "online",
+		}
+		err := db.Create(&agent).Error
+		require.NoError(t, err)
+
+		// Create three policies
+		policies := make([]store.Policy, 3)
+		for i := 0; i < 3; i++ {
+			policies[i] = store.Policy{
+				TenantID:       tenantID,
+				Name:           "Multi Policy " + string(rune('A'+i)),
+				Schedule:       "0 2 * * *",
+				IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+				RepositoryURL:  "s3:bucket/path" + string(rune('A'+i)),
+				RepositoryType: "s3",
+				RetentionRules: store.JSONB{"keep_daily": 7},
+				Enabled:        true,
+			}
+			err = db.Create(&policies[i]).Error
+			require.NoError(t, err)
+
+			// Assign each policy to agent
+			link := store.AgentPolicyLink{
+				AgentID:  agent.ID,
+				PolicyID: policies[i].ID,
+			}
+			err = db.Create(&link).Error
+			require.NoError(t, err)
+		}
+
+		// Verify agent has 3 policies
+		var count int64
+		db.Model(&store.AgentPolicyLink{}).Where("agent_id = ?", agent.ID).Count(&count)
+		assert.Equal(t, int64(3), count, "Agent should have 3 policy assignments")
+	})
+
+	t.Run("One policy can be assigned to multiple agents", func(t *testing.T) {
+		policy := store.Policy{
+			TenantID:       tenantID,
+			Name:           "Shared Policy",
+			Schedule:       "0 3 * * *",
+			IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+			RepositoryURL:  "s3:bucket/shared",
+			RepositoryType: "s3",
+			RetentionRules: store.JSONB{"keep_daily": 7},
+			Enabled:        true,
+		}
+		err := db.Create(&policy).Error
+		require.NoError(t, err)
+
+		// Create three agents
+		agents := make([]store.Agent, 3)
+		for i := 0; i < 3; i++ {
+			agents[i] = store.Agent{
+				TenantID: tenantID,
+				Hostname: "shared-agent-" + string(rune('A'+i)),
+				OS:       "linux",
+				Arch:     "amd64",
+				Version:  "1.0.0",
+				Status:   "online",
+			}
+			err = db.Create(&agents[i]).Error
+			require.NoError(t, err)
+
+			// Assign policy to each agent
+			link := store.AgentPolicyLink{
+				AgentID:  agents[i].ID,
+				PolicyID: policy.ID,
+			}
+			err = db.Create(&link).Error
+			require.NoError(t, err)
+		}
+
+		// Verify policy is assigned to 3 agents
+		var count int64
+		db.Model(&store.AgentPolicyLink{}).Where("policy_id = ?", policy.ID).Count(&count)
+		assert.Equal(t, int64(3), count, "Policy should be assigned to 3 agents")
+	})
+}
+
 // Helper functions for pointers
 func intPtr(i int) *int {
 	return &i

@@ -75,8 +75,10 @@ func (p *Policy) BeforeCreate(tx *gorm.DB) error {
 
 // AgentPolicyLink represents the many-to-many relationship between agents and policies
 type AgentPolicyLink struct {
-	AgentID   uuid.UUID `gorm:"not null;primaryKey;index" json:"agent_id"`
-	PolicyID  uuid.UUID `gorm:"not null;primaryKey;index" json:"policy_id"`
+	AgentID   uuid.UUID `gorm:"type:uuid;not null;primaryKey;index" json:"agent_id"`
+	PolicyID  uuid.UUID `gorm:"type:uuid;not null;primaryKey;index" json:"policy_id"`
+	Agent     Agent     `gorm:"constraint:OnDelete:CASCADE;foreignKey:AgentID;references:ID"`
+	Policy    Policy    `gorm:"constraint:OnDelete:CASCADE;foreignKey:PolicyID;references:ID"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
