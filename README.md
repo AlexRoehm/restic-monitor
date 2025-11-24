@@ -63,23 +63,146 @@ This design avoids firewall issues and works across Linux, Windows, and macOS.
 ```
 restic-monitor/
 │
-├── cmd/restic-monitor/  ← Main application entry point
-├── internal/            ← Core business logic
-│   ├── api/            ← REST API handlers
-│   ├── config/         ← Configuration management
-│   ├── monitor/        ← Restic monitoring logic
-│   └── store/          ← Database models & persistence
-├── frontend/           ← Vue 3 SPA
+├── cmd/                     ← Current: Orchestrator entry point
+│   └── restic-monitor/
+│       └── main.go
+│
+├── internal/                ← Current: Orchestrator business logic
+│   ├── api/                ← REST API handlers
+│   ├── config/             ← Configuration management
+│   ├── monitor/            ← Restic monitoring logic
+│   └── store/              ← Database models & persistence
+│
+├── frontend/                ← Current: Vue 3 web interface
 │   ├── src/
-│   │   ├── App.vue    ← Main component
-│   │   ├── i18n.js    ← Internationalization
-│   │   └── style.css  ← Tailwind CSS v4
-│   └── public/        ← Static assets
-├── config/             ← Target configuration
-│   └── targets.json   ← Repository definitions
-├── api/                ← OpenAPI/Swagger documentation
-├── data/               ← SQLite database
-└── agent/              ← Future: Backup Agent (coming soon)
+│   │   ├── App.vue        ← Main component
+│   │   ├── i18n.js        ← Internationalization
+│   │   └── style.css      ← Tailwind CSS v4
+│   └── public/            ← Static assets
+│
+├── api/                     ← Current: OpenAPI documentation
+│   ├── swagger.yaml
+│   ├── swagger.json
+│   └── docs.go
+│
+├── config/                  ← Current: Target configuration
+│   ├── targets.json        ← Repository definitions
+│   └── targets.example.json
+│
+├── data/                    ← Current: SQLite database
+├── public/                  ← Current: Snapshot file lists
+│
+└── agent/                   ← Future: Backup Agent (not yet implemented)
+    └── README.md           ← Agent planning documentation
+```
+
+**Current Structure:** All existing code represents the **orchestrator** (central monitoring system)
+
+**Future Structure:** The `agent/` directory contains planning documentation for the distributed backup agent that will be developed in 2026.
+
+### Orchestrator vs Agent
+
+| Component | Location | Status | Purpose |
+|-----------|----------|--------|---------|
+| **Orchestrator** | `cmd/`, `internal/`, `frontend/`, `api/` | ✅ Active | Central monitoring & management system |
+| **Agent** | `agent/` | 📋 Planned | Lightweight backup agent for target machines |
+
+The current codebase is the orchestrator. No restructuring of existing files is needed at this time.
+
+---
+
+## 🏗️ Architecture & Design
+
+### Current: Centralized Monitoring (v0.x)
+
+The current implementation is a **centralized orchestrator** that:
+- Polls Restic repositories directly
+- Requires network access to all backup targets
+- Stores status and snapshots in SQLite
+- Provides a web UI for visualization
+
+```
+┌─────────────────────────────────────┐
+│   Restic Monitor (Orchestrator)     │
+│  ┌──────────────┐  ┌──────────────┐ │
+│  │   Vue UI     │  │   Go API     │ │
+│  └──────────────┘  └──────────────┘ │
+│         │                 │          │
+│         └────────┬────────┘          │
+│                  │                   │
+│           ┌──────▼──────┐           │
+│           │   SQLite    │           │
+│           └─────────────┘           │
+└────────────────┬────────────────────┘
+                 │
+      ┌──────────┼──────────┐
+      │          │          │
+┌─────▼───┐ ┌───▼────┐ ┌───▼────┐
+│ Restic  │ │ Restic │ │ Restic │
+│ Repo 1  │ │ Repo 2 │ │ Repo 3 │
+└─────────┘ └────────┘ └────────┘
+```
+
+### Future: Distributed Agent System (v1.x+)
+
+The planned architecture introduces **lightweight agents** on each backup target:
+
+```
+┌─────────────────────────────────────────┐
+│    Restic Monitor (Orchestrator)        │
+│  ┌──────────────┐  ┌──────────────┐    │
+│  │   Vue UI     │  │   Go API     │    │
+│  │              │  │              │    │
+│  │ - Dashboard  │  │ - Policies   │    │
+│  │ - Logs       │  │ - Scheduling │    │
+│  │ - Policies   │  │ - Agent Mgmt │    │
+│  └──────────────┘  └──────────────┘    │
+│         │                 │             │
+│         └────────┬────────┘             │
+│                  │                      │
+│           ┌──────▼──────┐              │
+│           │  Database   │              │
+│           │  (Postgres) │              │
+│           └─────────────┘              │
+└───────────────┬────────────────────────┘
+                │ HTTPS (Pull-based)
+                │
+    ┌───────────┼───────────┐
+    │           │           │
+┌───▼────┐  ┌──▼─────┐  ┌──▼─────┐
+│ Agent  │  │ Agent  │  │ Agent  │
+│        │  │        │  │        │
+│ ┌────┐ │  │ ┌────┐ │  │ ┌────┐ │
+│ │Res │ │  │ │Res │ │  │ │Res │ │
+│ │tic │ │  │ │tic │ │  │ │tic │ │
+│ └────┘ │  │ └────┘ │  │ └────┘ │
+└────────┘  └────────┘  └────────┘
+ Server 1    Server 2    Server 3
+```
+
+**Agent Responsibilities:**
+- Register with orchestrator
+- Poll for backup tasks
+- Execute Restic locally
+- Stream logs and status
+- Report health metrics
+
+**Orchestrator Responsibilities:**
+- Define backup policies
+- Schedule tasks
+- Track agent health
+- Aggregate logs and metrics
+- Provide unified UI
+
+### Why Pull-Based?
+
+The agent uses a **pull model** instead of push:
+
+✅ **Firewall Friendly**: Agents initiate connections (no inbound ports)  
+✅ **NAT Traversal**: Works behind NAT without port forwarding  
+✅ **Secure**: One-way trust (agents trust orchestrator, not vice versa)  
+✅ **Scalable**: Orchestrator doesn't need to track agent IPs  
+✅ **Resilient**: Agents reconnect automatically after network issues  
 
 ---
 
@@ -94,13 +217,17 @@ restic-monitor/
 ✅ Swagger API documentation  
 ✅ Mock mode for development  
 
-### Phase 2 — Backup Agent (Coming Soon)
+### Phase 2 — Backup Agent (2026)
 
+⬜ Agent architecture design and planning  
 ⬜ Go agent binary for Linux/Windows/macOS  
-⬜ Agent installation scripts  
+⬜ Agent installation scripts and systemd/Windows service integration  
 ⬜ Task execution engine (restic backup/check/prune)  
-⬜ Secure token storage  
+⬜ Secure token storage and authentication  
 ⬜ API for agent registration & heartbeat  
+⬜ Long-polling or WebSocket for task distribution  
+
+**See:** [`agent/README.md`](agent/README.md) for detailed agent planning
 
 ### Phase 3 — UI Enhancements
 
@@ -120,12 +247,13 @@ restic-monitor/
 
 ## 🔍 Current Limitations
 
-* No agent system yet (manual Restic setup required)
-* No task scheduling (monitoring only)
-* No backup automation
-* No centralized policy management
+* **No agent system** - Orchestrator must have direct network access to all Restic repositories
+* **No distributed architecture** - All monitoring runs centrally
+* **No task scheduling** - Monitoring only (no automated backups)
+* **No backup automation** - Manual Restic setup required on each machine
+* **No centralized policy management** - Retention policies configured per-target
 
-These limitations will be removed as the orchestrator/agent architecture is implemented.
+These limitations will be addressed with the agent system (see [`agent/README.md`](agent/README.md))
 
 ---
 
@@ -515,14 +643,33 @@ make test
 
 ## 🤝 Contributing
 
-Contributions are welcome! The upcoming agent architecture is documented in the roadmap above.
+Contributions are welcome!
 
-**Areas for contribution:**
-- Agent system design and implementation
-- Additional UI features
-- Tests and documentation
-- Internationalization (new languages)
+**Current Focus Areas:**
+- Bug fixes and improvements to orchestrator
+- UI/UX enhancements
+- Additional API endpoints
+- Documentation improvements
+- Tests and test coverage
+
+**Future Development:**
+- Agent system design (see [`agent/README.md`](agent/README.md))
+- Distributed architecture planning
 - Plugin system for custom backup sources
+
+**How to Contribute:**
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Add tests if applicable
+5. Commit your changes (`git commit -m 'Add amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
+
+**Discussions:**
+- Use `[orchestrator]` prefix for current system improvements
+- Use `[agent]` prefix for agent-related proposals
+- Use `[architecture]` prefix for system-wide design discussions
 
 Please open an issue to discuss major changes before submitting a PR.
 
@@ -543,9 +690,13 @@ MIT License - see LICENSE file for details
 
 ## 📚 Additional Resources
 
-- [Swagger API Documentation](http://localhost:8080/api/v1/swagger) (when `SHOW_SWAGGER=true`)
-- [Makefile Commands](Makefile) - See `make help` for all available commands
-- [Example Configuration](config/targets.example.json)
+- **Architecture Documentation:** [`docs/architecture.md`](docs/architecture.md) - Complete system architecture
+- **Agent Planning:** [`agent/README.md`](agent/README.md) - Detailed agent system design
+- **API Documentation:** [Swagger UI](http://localhost:8080/api/v1/swagger) (when `SHOW_SWAGGER=true`)
+- **Makefile Commands:** See `make help` for all available commands
+- **Example Configuration:** [`config/targets.example.json`](config/targets.example.json)
+- **Restic Documentation:** [restic.readthedocs.io](https://restic.readthedocs.io/)
+- **AE Backend:** [github.com/AgileExecutives/ae-backend](https://github.com/AgileExecutives/ae-backend)
 
 ---
 

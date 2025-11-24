@@ -5,12 +5,14 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
 type Store struct {
-	db *gorm.DB
+	db       *gorm.DB
+	tenantID uuid.UUID
 }
 
 // Target represents a Restic repository to monitor.
@@ -91,16 +93,34 @@ type TargetData struct {
 }
 
 func New(dsn string) (*Store, error) {
+	return NewWithTenant(dsn, uuid.New())
+}
+
+// NewWithTenant creates a store with a specific tenant ID
+func NewWithTenant(dsn string, tenantID uuid.UUID) (*Store, error) {
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		return nil, err
 	}
 
+	// Run migrations
+	ctx := context.Background()
+	runner := NewMigrationRunner(db)
+	if err := runner.Initialize(ctx); err != nil {
+		return nil, err
+	}
+
+	migrations := GetAllMigrations(tenantID)
+	if err := runner.RunAll(ctx, migrations); err != nil {
+		return nil, err
+	}
+
+	// Legacy: also ensure old tables exist for backward compatibility
 	if err := db.AutoMigrate(&BackupStatus{}, &SnapshotFile{}, &Target{}); err != nil {
 		return nil, err
 	}
 
-	return &Store{db: db}, nil
+	return &Store{db: db, tenantID: tenantID}, nil
 }
 
 func (s *Store) SaveStatus(ctx context.Context, data StatusData) error {
@@ -211,4 +231,124 @@ func (s *Store) ToggleTargetDisabled(ctx context.Context, name string) error {
 	}
 	target.Disabled = !target.Disabled
 	return s.db.WithContext(ctx).Save(&target).Error
+}
+
+// GetDB returns the underlying GORM DB instance
+func (s *Store) GetDB() *gorm.DB {
+	return s.db
+}
+
+// GetTenantID returns the tenant ID for this store
+func (s *Store) GetTenantID() uuid.UUID {
+	return s.tenantID
+}
+
+// Agent-related methods
+
+// CreateAgent creates a new agent
+func (s *Store) CreateAgent(ctx context.Context, agent *Agent) error {
+	agent.TenantID = s.tenantID
+	return s.db.WithContext(ctx).Create(agent).Error
+}
+
+// ListAgents returns all agents for this tenant
+func (s *Store) ListAgents(ctx context.Context) ([]Agent, error) {
+	var agents []Agent
+	err := s.db.WithContext(ctx).
+		Where("tenant_id = ?", s.tenantID).
+		Order("hostname asc").
+		Find(&agents).Error
+	return agents, err
+}
+
+// GetAgent retrieves an agent by ID
+func (s *Store) GetAgent(ctx context.Context, id uuid.UUID) (Agent, error) {
+	var agent Agent
+	err := s.db.WithContext(ctx).
+		Where("id = ? AND tenant_id = ?", id, s.tenantID).
+		First(&agent).Error
+	return agent, err
+}
+
+// UpdateAgentStatus updates the status and last_seen_at for an agent
+func (s *Store) UpdateAgentStatus(ctx context.Context, id uuid.UUID, status string) error {
+	now := time.Now()
+	return s.db.WithContext(ctx).
+		Model(&Agent{}).
+		Where("id = ? AND tenant_id = ?", id, s.tenantID).
+		Updates(map[string]interface{}{
+			"status":       status,
+			"last_seen_at": now,
+		}).Error
+}
+
+// Policy-related methods
+
+// CreatePolicy creates a new policy
+func (s *Store) CreatePolicy(ctx context.Context, policy *Policy) error {
+	policy.TenantID = s.tenantID
+	return s.db.WithContext(ctx).Create(policy).Error
+}
+
+// ListPolicies returns all policies for this tenant
+func (s *Store) ListPolicies(ctx context.Context) ([]Policy, error) {
+	var policies []Policy
+	err := s.db.WithContext(ctx).
+		Where("tenant_id = ?", s.tenantID).
+		Order("name asc").
+		Find(&policies).Error
+	return policies, err
+}
+
+// GetPolicy retrieves a policy by ID
+func (s *Store) GetPolicy(ctx context.Context, id uuid.UUID) (Policy, error) {
+	var policy Policy
+	err := s.db.WithContext(ctx).
+		Where("id = ? AND tenant_id = ?", id, s.tenantID).
+		First(&policy).Error
+	return policy, err
+}
+
+// BackupRun-related methods
+
+// CreateBackupRun creates a new backup run
+func (s *Store) CreateBackupRun(ctx context.Context, run *BackupRun) error {
+	run.TenantID = s.tenantID
+	return s.db.WithContext(ctx).Create(run).Error
+}
+
+// ListBackupRuns returns backup runs with optional filters
+func (s *Store) ListBackupRuns(ctx context.Context, agentID *uuid.UUID, policyID *uuid.UUID, limit int) ([]BackupRun, error) {
+	query := s.db.WithContext(ctx).Where("tenant_id = ?", s.tenantID)
+
+	if agentID != nil {
+		query = query.Where("agent_id = ?", *agentID)
+	}
+	if policyID != nil {
+		query = query.Where("policy_id = ?", *policyID)
+	}
+
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+
+	var runs []BackupRun
+	err := query.Order("start_time desc").Find(&runs).Error
+	return runs, err
+}
+
+// GetBackupRun retrieves a backup run by ID
+func (s *Store) GetBackupRun(ctx context.Context, id uuid.UUID) (BackupRun, error) {
+	var run BackupRun
+	err := s.db.WithContext(ctx).
+		Where("id = ? AND tenant_id = ?", id, s.tenantID).
+		First(&run).Error
+	return run, err
+}
+
+// UpdateBackupRun updates a backup run
+func (s *Store) UpdateBackupRun(ctx context.Context, run *BackupRun) error {
+	return s.db.WithContext(ctx).
+		Where("tenant_id = ?", s.tenantID).
+		Save(run).Error
 }

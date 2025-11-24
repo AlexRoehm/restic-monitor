@@ -55,6 +55,11 @@ func New(cfg config.Config, st *store.Store, mon Monitor, staticDir string) *API
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
 
+	// Agent API routes
+	mux.HandleFunc("/agents/register", a.handleAgentRegister)
+	mux.HandleFunc("/agents/", a.handleAgentsRouter) // Routes to GET or heartbeat handler
+	mux.HandleFunc("/agents", a.handleGetAgents)     // GET /agents (list)
+
 	// API routes under /api/v1/
 	mux.HandleFunc("/api/v1/status", a.handleStatus)
 	mux.HandleFunc("/api/v1/status/", a.handleStatusByName)
@@ -130,11 +135,14 @@ func fileExists(staticDir, path string) bool {
 }
 
 // authMiddleware wraps a handler with HTTP Basic Authentication and Bearer token support
-// Only protects /api/ routes, excludes swagger endpoints
+// Only protects /api/ and /agents routes, excludes swagger endpoints
 func (a *API) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Only require auth for API routes
-		if !strings.HasPrefix(r.URL.Path, "/api/") {
+		// Only require auth for API routes and agent routes
+		requiresAuth := strings.HasPrefix(r.URL.Path, "/api/") ||
+			strings.HasPrefix(r.URL.Path, "/agents/") ||
+			r.URL.Path == "/agents"
+		if !requiresAuth {
 			next.ServeHTTP(w, r)
 			return
 		}
