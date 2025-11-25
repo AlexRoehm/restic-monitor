@@ -1,237 +1,247 @@
 # Restic Monitor Agent
 
-**Status:** 🚧 Planned - Not Yet Implemented
+**Status:** 🔨 IN PROGRESS - Configuration System Implemented (EPIC 8.1 Complete)
 
-The Restic Monitor Agent is a lightweight, cross-platform backup agent that will run on machines that need to be backed up. It communicates with the central orchestrator using a pull-based model.
+The Restic Monitor Agent is a lightweight, cross-platform backup agent that runs on machines that need to be backed up. It communicates with the central orchestrator using a pull-based model.
 
-## Architecture Overview
+## Current Status (EPIC 8)
 
-### Pull-Based Communication
+✅ **User Story 8.1 COMPLETE:** Agent Configuration Format & Loader  
+- 14 configuration fields with comprehensive validation
+- Environment variable overrides (13 RESTIC_AGENT_* variables)
+- YAML-based configuration with sensible defaults
+- 14 test functions, 30 test cases passing
 
-The agent uses a **pull-based** communication model to avoid firewall issues:
+🔲 **Next:** User Story 8.2 - Agent Identity Persistence  
+🔲 **Then:** User Story 8.3 - First-Run Registration Workflow
 
-1. **Registration**: Agent registers itself with the orchestrator on first startup
-2. **Heartbeat**: Sends periodic heartbeats to indicate it's alive
-3. **Task Polling**: Polls the orchestrator for pending tasks (backup/check/prune)
-4. **Execution**: Runs Restic commands locally
-5. **Reporting**: Sends logs and status updates back to orchestrator
+See `docs/epic8-status.md` for complete roadmap.
 
-### Planned Features
+## Quick Start
 
-- ✅ **Cross-Platform**: Windows, Linux, macOS support
-- ✅ **Lightweight**: Minimal resource footprint
-- ✅ **Secure**: Token-based authentication with orchestrator
-- ✅ **Resilient**: Works behind NAT/firewalls
-- ✅ **Automated**: Schedule-based and policy-driven backups
-- ✅ **Extensible**: Plugin system for custom backup sources
+### Configuration File
 
-## Directory Structure (Planned)
-
-```
-agent/
-├── cmd/
-│   └── agent/
-│       └── main.go           # Agent entry point
-├── pkg/
-│   ├── client/               # Orchestrator API client
-│   ├── executor/             # Restic command executor
-│   ├── scheduler/            # Task scheduling
-│   ├── heartbeat/            # Health monitoring
-│   └── config/               # Agent configuration
-├── plugins/                  # Extensible backup sources
-│   ├── mysql/               # MySQL dump plugin
-│   ├── postgres/            # PostgreSQL dump plugin
-│   └── docker/              # Docker volume plugin
-└── README.md
-```
-
-## Planned Components
-
-### 1. Orchestrator Client (`pkg/client/`)
-
-Handles communication with the central orchestrator:
-- Registration and authentication
-- Task polling (long-polling or intervals)
-- Status reporting
-- Log streaming
-
-### 2. Task Executor (`pkg/executor/`)
-
-Executes Restic operations:
-- `backup` - Create new snapshots
-- `check` - Verify repository integrity
-- `prune` - Remove old snapshots per policy
-- `forget` - Delete specific snapshots
-
-### 3. Scheduler (`pkg/scheduler/`)
-
-Manages task execution:
-- Cron-like scheduling
-- Policy-based triggers
-- Resource throttling
-- Retry logic
-
-### 4. Heartbeat (`pkg/heartbeat/`)
-
-Monitors agent health:
-- Periodic status updates
-- Resource usage reporting
-- Network connectivity checks
-- Disk space monitoring
-
-### 5. Plugin System (`plugins/`)
-
-Extensible backup sources:
-- Database dumps (MySQL, PostgreSQL, MongoDB)
-- Docker volumes
-- VM snapshots
-- Application-specific backups
-
-## Configuration (Planned)
-
-The agent will use a YAML configuration file:
+Create `/etc/restic-agent/agent.yaml`:
 
 ```yaml
-orchestrator:
-  url: https://restic-monitor.example.com
-  token: <agent-token>
-  
-agent:
-  id: server-01
-  hostname: web-server
-  poll_interval: 60s
-  heartbeat_interval: 30s
+# Required fields
+orchestratorUrl: "https://backup.example.com"
+authenticationToken: "your-secret-token"
 
-restic:
-  binary: /usr/bin/restic
-  cache_dir: /var/cache/restic
-  config_dir: /etc/restic
-
-backup:
-  sources:
-    - path: /home
-      policy: daily
-    - path: /etc
-      policy: hourly
-  
-  exclude:
-    - /home/*/.cache
-    - /home/*/tmp
-
-plugins:
-  mysql:
-    enabled: true
-    host: localhost
-    user: backup
-    password_file: /etc/mysql/backup.pass
+# Optional fields (showing defaults)
+logLevel: "info"                      # debug, info, warn, error
+pollingIntervalSeconds: 30            # 5-3600 seconds
+heartbeatIntervalSeconds: 60          # 10-3600 seconds
+maxConcurrentJobs: 2                  # 1-10 jobs
+httpTimeoutSeconds: 30                # 5-300 seconds
+retryMaxAttempts: 3                   # 0-10 attempts
+retryBackoffSeconds: 5                # 1-60 seconds
 ```
 
-## Installation (Future)
+### Environment Variables
 
-### Linux (systemd)
+Override configuration values:
 
 ```bash
-# Download agent
-wget https://github.com/AlexRoehm/restic-monitor/releases/download/v1.0.0/restic-agent-linux-amd64
-chmod +x restic-agent-linux-amd64
-sudo mv restic-agent-linux-amd64 /usr/local/bin/restic-agent
-
-# Create configuration
-sudo mkdir -p /etc/restic-agent
-sudo nano /etc/restic-agent/config.yaml
-
-# Install systemd service
-sudo restic-agent install
-sudo systemctl enable restic-agent
-sudo systemctl start restic-agent
+export RESTIC_AGENT_ORCHESTRATOR_URL="https://backup.example.com"
+export RESTIC_AGENT_AUTH_TOKEN="secret-token"
+export RESTIC_AGENT_LOG_LEVEL="debug"
+export RESTIC_AGENT_POLLING_INTERVAL="15"
 ```
 
-### Windows (Service)
+See `docs/agent/configuration-spec.md` for complete documentation.
 
-```powershell
-# Download agent
-Invoke-WebRequest -Uri https://github.com/AlexRoehm/restic-monitor/releases/download/v1.0.0/restic-agent-windows-amd64.exe -OutFile restic-agent.exe
+## Configuration Management
 
-# Create configuration
-New-Item -Path "C:\Program Files\ResticAgent" -ItemType Directory
-notepad "C:\Program Files\ResticAgent\config.yaml"
+The agent package provides robust configuration loading with:
 
-# Install as Windows service
-.\restic-agent.exe install
-Start-Service ResticAgent
+### Features
+- ✅ YAML-based configuration format
+- ✅ Environment variable overrides
+- ✅ Sensible defaults for optional fields
+- ✅ Comprehensive validation with detailed error messages
+- ✅ URL format validation
+- ✅ Range validation for all numeric fields
+- ✅ Log level enum validation
+
+### Usage
+
+```go
+import "github.com/example/restic-monitor/agent"
+
+cfg, err := agent.LoadConfig("/etc/restic-agent/agent.yaml")
+if err != nil {
+    log.Fatalf("Configuration error: %v", err)
+}
+
+fmt.Printf("Orchestrator: %s\n", cfg.OrchestratorURL)
+fmt.Printf("Polling interval: %d seconds\n", cfg.PollingIntervalSeconds)
 ```
 
-### macOS (launchd)
+### Validation
+
+The configuration loader validates:
+- ✅ Required fields (orchestratorUrl, authenticationToken)
+- ✅ URL format (http/https only, no trailing slash)
+- ✅ Log level (debug, info, warn, error)
+- ✅ Polling interval (5-3600 seconds)
+- ✅ Heartbeat interval (10-3600 seconds)
+- ✅ Max concurrent jobs (1-10)
+- ✅ HTTP timeout (5-300 seconds)
+- ✅ Retry settings (0-10 attempts, 1-60 second backoff)
+
+### Error Handling
+
+Detailed error messages help troubleshoot configuration issues:
+
+```
+configuration validation failed: orchestratorUrl is required; 
+pollingIntervalSeconds must be between 5 and 3600; 
+logLevel must be one of: debug, info, warn, error
+```
+
+## Testing
+
+Comprehensive test coverage with TDD methodology:
 
 ```bash
-# Download agent
-brew install restic-agent
-
-# Create configuration
-mkdir -p ~/.config/restic-agent
-nano ~/.config/restic-agent/config.yaml
-
-# Install launch agent
-restic-agent install --user
-launchctl load ~/Library/LaunchAgents/com.restic-monitor.agent.plist
+go test ./agent/... -v
 ```
 
-## Development Timeline
+**Test Coverage (14 functions, 30 test cases):**
+- ✅ Minimal valid configuration
+- ✅ Full configuration with all fields
+- ✅ Missing required fields
+- ✅ Invalid YAML parsing
+- ✅ File not found errors
+- ✅ Range validation (pollingIntervalSeconds, maxConcurrentJobs)
+- ✅ Enum validation (logLevel)
+- ✅ Environment variable overrides
+- ✅ URL format validation (protocol, trailing slash)
+- ✅ Default value application
 
-### Phase 1: Core Agent (Q1 2026)
-- [ ] Basic orchestrator client
-- [ ] Task polling mechanism
+## Documentation
+
+- **Configuration Spec:** `docs/agent/configuration-spec.md` (650+ lines)
+- **EPIC 8 Status:** `docs/epic8-status.md`
+- **Architecture:** `docs/architecture.md`
+
+## Roadmap (EPIC 8)
+
+## Roadmap (EPIC 8)
+
+### ✅ Phase 1: Configuration System (COMPLETE)
+- ✅ YAML configuration format
+- ✅ Environment variable overrides
+- ✅ Comprehensive validation
+- ✅ 14 test functions, 30 test cases
+
+### 🔲 Phase 2: Identity & Registration (IN PROGRESS)
+- [ ] State file persistence (state.json)
+- [ ] Agent UUID generation
+- [ ] POST /agents/register API call
+- [ ] First-run registration workflow
+
+### 🔲 Phase 3: Installation & Bootstrap
+- [ ] Linux installation script (systemd)
+- [ ] macOS installation script (launchd)
+- [ ] Windows installation script (service)
+- [ ] Agent diagnostics (--test-config)
+- [ ] Bootstrap logging
+
+### 🔲 Phase 4: Core Agent Runtime
+- [ ] Heartbeat mechanism
+- [ ] Task polling
 - [ ] Restic executor
-- [ ] Configuration management
-- [ ] Logging and error handling
+- [ ] Job scheduling
+- [ ] Log streaming
 
-### Phase 2: Platform Support (Q2 2026)
-- [ ] Windows service integration
-- [ ] Linux systemd integration
-- [ ] macOS launchd integration
-- [ ] Cross-compilation builds
-- [ ] Installation scripts
-
-### Phase 3: Advanced Features (Q3 2026)
+### 🔲 Phase 5: Advanced Features
 - [ ] Plugin system
 - [ ] Database backup plugins
 - [ ] Docker volume support
 - [ ] Resource monitoring
 - [ ] Auto-update mechanism
 
-### Phase 4: Production Ready (Q4 2026)
-- [ ] Comprehensive testing
-- [ ] Security audit
-- [ ] Performance optimization
-- [ ] Documentation
-- [ ] Release v1.0.0
+## Configuration Fields
 
-## API Contract (Planned)
+| Field | Type | Required | Default | Validation |
+|-------|------|----------|---------|------------|
+| orchestratorUrl | string | Yes | - | http/https, no trailing slash |
+| authenticationToken | string | Yes | - | Non-empty |
+| agentId | string | No | - | UUID format |
+| hostnameOverride | string | No | - | - |
+| logLevel | string | No | info | debug, info, warn, error |
+| logFile | string | No | - | Valid path |
+| pollingIntervalSeconds | int | No | 30 | 5-3600 |
+| heartbeatIntervalSeconds | int | No | 60 | 10-3600 |
+| maxConcurrentJobs | int | No | 2 | 1-10 |
+| httpTimeoutSeconds | int | No | 30 | 5-300 |
+| retryMaxAttempts | int | No | 3 | 0-10 |
+| retryBackoffSeconds | int | No | 5 | 1-60 |
+| stateFile | string | No | /var/lib/restic-agent/state.json | - |
+| tempDir | string | No | /tmp/restic-agent | - |
 
-The agent will communicate with these orchestrator endpoints:
+## Environment Variables
 
-### POST `/api/v1/agent/register`
-Register a new agent with the orchestrator.
+All configuration fields can be overridden via environment variables:
 
-### POST `/api/v1/agent/heartbeat`
-Send periodic health status.
-
-### GET `/api/v1/agent/tasks`
-Poll for pending tasks (long-polling supported).
-
-### POST `/api/v1/agent/tasks/{id}/status`
-Update task execution status.
-
-### POST `/api/v1/agent/logs`
-Stream logs to orchestrator.
+- `RESTIC_AGENT_ORCHESTRATOR_URL`
+- `RESTIC_AGENT_AUTH_TOKEN`
+- `RESTIC_AGENT_ID`
+- `RESTIC_AGENT_HOSTNAME`
+- `RESTIC_AGENT_LOG_LEVEL`
+- `RESTIC_AGENT_LOG_FILE`
+- `RESTIC_AGENT_POLLING_INTERVAL`
+- `RESTIC_AGENT_HEARTBEAT_INTERVAL`
+- `RESTIC_AGENT_MAX_CONCURRENT_JOBS`
+- `RESTIC_AGENT_HTTP_TIMEOUT`
+- `RESTIC_AGENT_STATE_FILE`
+- `RESTIC_AGENT_TEMP_DIR`
 
 ## Security Considerations
 
-- **Token-Based Auth**: Each agent has a unique token
-- **TLS Required**: All communication over HTTPS
-- **Token Rotation**: Support for periodic token refresh
-- **Least Privilege**: Agent runs with minimal permissions
-- **Secure Storage**: Credentials stored in OS keyring/credential manager
+1. **Token Storage:** Never commit `authenticationToken` to version control
+2. **Environment Variables:** Use `RESTIC_AGENT_AUTH_TOKEN` for sensitive values
+3. **File Permissions:** Set `agent.yaml` to `0600` (owner read/write only)
+4. **URL Validation:** Only `http`/`https` protocols allowed
+5. **State File:** Protect `state.json` with appropriate permissions
+
+## Examples
+
+### Minimal Configuration
+
+```yaml
+orchestratorUrl: "https://backup.example.com"
+authenticationToken: "abc123..."
+```
+
+### Production Configuration
+
+```yaml
+orchestratorUrl: "https://backup.example.com:8443"
+authenticationToken: "${RESTIC_AGENT_AUTH_TOKEN}"
+logLevel: "info"
+logFile: "/var/log/restic-agent/agent.log"
+pollingIntervalSeconds: 15
+heartbeatIntervalSeconds: 30
+maxConcurrentJobs: 4
+httpTimeoutSeconds: 60
+retryMaxAttempts: 5
+retryBackoffSeconds: 10
+```
+
+### Development Configuration
+
+```yaml
+orchestratorUrl: "http://localhost:8080"
+authenticationToken: "dev-token"
+logLevel: "debug"
+pollingIntervalSeconds: 5
+maxConcurrentJobs: 1
+stateFile: "./state.json"
+tempDir: "./tmp"
+```
 
 ## Contributing
 

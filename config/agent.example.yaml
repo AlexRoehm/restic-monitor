@@ -1,0 +1,21 @@
+# Restic Agent - Simple Example Configuration
+#
+# This is a minimal configuration file for quick testing.
+# Copy this to agent.yaml and update the values.
+
+# Required: Orchestrator server URL
+orchestratorUrl: "http://localhost:8080"
+
+# Required: Authentication token (replace with your actual token)
+authenticationToken: "your-secret-token-here"
+
+# Optional: Override hostname (defaults to system hostname)
+# hostnameOverride: "my-backup-server"
+
+# Optional: Log level - uncomment to change from default "info"
+# logLevel: "debug"
+
+# Optional: Log file - uncomment to log to file instead of stdout
+# logFile: "/var/log/restic-agent/agent.log"
+
+# All other settings will use defaults - see docs for full options
