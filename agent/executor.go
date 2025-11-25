@@ -126,6 +126,9 @@ func (e *TaskExecutor) buildPruneArgs(task Task) []string {
 		if keepMonthly, ok := task.Retention["keepMonthly"].(float64); ok {
 			args = append(args, fmt.Sprintf("--keep-monthly=%d", int(keepMonthly)))
 		}
+		if keepYearly, ok := task.Retention["keepYearly"].(float64); ok {
+			args = append(args, fmt.Sprintf("--keep-yearly=%d", int(keepYearly)))
+		}
 	}
 
 	return args
@@ -193,6 +196,24 @@ func (e *TaskExecutor) ExecuteWithEnv(task Task, env map[string]string) (TaskRes
 		result.SnapshotID = ExtractSnapshotID(result.Log)
 	}
 
+	// Parse and store check result metadata
+	if task.TaskType == "check" {
+		checkResult := ParseCheckOutput(result.Log)
+		result.Metadata["checkResult"] = &checkResult
+		// Update status based on check result
+		if checkResult.Success {
+			result.Status = "success"
+		} else {
+			result.Status = "failure"
+		}
+	}
+
+	// Parse and store prune result metadata
+	if task.TaskType == "prune" && result.Status == "success" {
+		pruneResult := ParsePruneOutput(result.Log)
+		result.Metadata["pruneResult"] = &pruneResult
+	}
+
 	return result, nil
 }
 
@@ -220,16 +241,18 @@ func ExtractSnapshotID(output string) string {
 
 // CheckResult represents the result of a repository check
 type CheckResult struct {
-	Success     bool   `json:"success"`
-	ErrorsFound int    `json:"errorsFound"`
-	Summary     string `json:"summary"`
+	Success       bool   `json:"success"`
+	ErrorsFound   int    `json:"errorsFound"`
+	WarningsFound int    `json:"warningsFound"`
+	Summary       string `json:"summary"`
 }
 
 // ParseCheckOutput parses the output from a restic check command
 func ParseCheckOutput(output string) CheckResult {
 	result := CheckResult{
-		Success:     true,
-		ErrorsFound: 0,
+		Success:       true,
+		ErrorsFound:   0,
+		WarningsFound: 0,
 	}
 
 	lines := strings.Split(output, "\n")
@@ -242,15 +265,31 @@ func ParseCheckOutput(output string) CheckResult {
 			result.Success = false
 		}
 
+		// Count warnings
+		if strings.HasPrefix(line, "warning:") {
+			result.WarningsFound++
+		}
+
 		// Check for fatal errors
 		if strings.HasPrefix(line, "Fatal:") {
 			result.Success = false
-			result.Summary = line
+			result.Summary = "Failed: " + line
 		}
 
 		// Check for success message
-		if strings.Contains(line, "no errors were found") {
-			result.Summary = line
+		if strings.Contains(line, "no errors were found") || strings.Contains(line, "no fatal errors") {
+			if result.ErrorsFound == 0 {
+				result.Summary = "Success: " + line
+			}
+		}
+	}
+
+	// Set summary if not already set
+	if result.Summary == "" {
+		if result.Success {
+			result.Summary = fmt.Sprintf("Check complete: %d errors, %d warnings", result.ErrorsFound, result.WarningsFound)
+		} else {
+			result.Summary = fmt.Sprintf("Check failed: %d errors found", result.ErrorsFound)
 		}
 	}
 
@@ -259,33 +298,65 @@ func ParseCheckOutput(output string) CheckResult {
 
 // PruneResult represents the result of a prune operation
 type PruneResult struct {
-	SnapshotsRemoved int    `json:"snapshotsRemoved"`
-	SnapshotsKept    int    `json:"snapshotsKept"`
-	SpaceFreedBytes  int64  `json:"spaceFreedBytes"`
-	Summary          string `json:"summary"`
+	SnapshotsRemoved   int      `json:"snapshotsRemoved"`
+	SnapshotsKept      int      `json:"snapshotsKept"`
+	SpaceFreedBytes    int64    `json:"spaceFreedBytes"`
+	DeletedSnapshotIDs []string `json:"deletedSnapshotIds,omitempty"`
+	Summary            string   `json:"summary"`
 }
 
 // ParsePruneOutput parses the output from a restic forget --prune command
 func ParsePruneOutput(output string) PruneResult {
-	result := PruneResult{}
+	result := PruneResult{
+		DeletedSnapshotIDs: make([]string, 0),
+	}
 
 	lines := strings.Split(output, "\n")
+	inRemoveSection := false
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
+
+		// Detect "remove X snapshots:" section
+		if strings.HasPrefix(line, "remove ") && strings.Contains(line, " snapshots") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				fmt.Sscanf(parts[1], "%d", &result.SnapshotsRemoved)
+			}
+			inRemoveSection = true
+			continue
+		}
+
+		// Exit remove section when we hit other known sections
+		if inRemoveSection && (strings.HasPrefix(line, "keep ") ||
+			strings.Contains(line, "snapshots have been removed") ||
+			strings.Contains(line, "no snapshots were removed") ||
+			strings.Contains(line, "repository is already") ||
+			strings.Contains(line, "counting files") ||
+			strings.Contains(line, "building new index") ||
+			len(line) == 0) {
+			inRemoveSection = false
+		}
+
+		// Extract snapshot IDs from remove section
+		if inRemoveSection && len(line) > 0 && !strings.HasPrefix(line, "ID") && !strings.HasPrefix(line, "remove") {
+			// Line format: "old001    2024-01-01 10:00:00  server1"
+			parts := strings.Fields(line)
+			if len(parts) >= 1 && !strings.Contains(line, "Time") && !strings.Contains(line, "Host") {
+				// First field is the snapshot ID
+				snapshotID := parts[0]
+				// Validate it looks like a snapshot ID (alphanumeric, reasonable length)
+				if len(snapshotID) >= 6 && len(snapshotID) <= 64 {
+					result.DeletedSnapshotIDs = append(result.DeletedSnapshotIDs, snapshotID)
+				}
+			}
+		}
 
 		// Parse snapshots kept
 		if strings.HasPrefix(line, "keep ") && strings.Contains(line, " snapshots") {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
 				fmt.Sscanf(parts[1], "%d", &result.SnapshotsKept)
-			}
-		}
-
-		// Parse snapshots removed
-		if strings.HasPrefix(line, "remove ") && strings.Contains(line, " snapshots") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				fmt.Sscanf(parts[1], "%d", &result.SnapshotsRemoved)
 			}
 		}
 

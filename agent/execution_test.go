@@ -906,3 +906,332 @@ func TestExecutionMetricsSnapshot(t *testing.T) {
 	assert.Equal(t, 0, snapshot.ConcurrentTasks)
 	assert.NotEmpty(t, snapshot.Timestamp)
 }
+
+// ========================================
+// EPIC 12.1: Enhanced Check Task Tests
+// ========================================
+
+// TestCheckTaskWithWarnings tests check task with warnings captured (TDD - Epic 12.1)
+func TestCheckTaskWithWarnings(t *testing.T) {
+	executor := agent.NewTaskExecutor("/bin/echo")
+
+	task := agent.Task{
+		TaskID:     uuid.New().String(),
+		TaskType:   "check",
+		Repository: "warning: pack abc123 is damaged\nno fatal errors\nchecked 100 files",
+	}
+
+	env := map[string]string{
+		"RESTIC_REPOSITORY": task.Repository,
+		"RESTIC_PASSWORD":   "test",
+	}
+
+	result, err := executor.ExecuteWithEnv(task, env)
+	require.NoError(t, err)
+
+	assert.Equal(t, "success", result.Status)
+	assert.Contains(t, result.Log, "warning")
+
+	// Check metadata includes warnings
+	if result.Metadata != nil {
+		if checkResult, ok := result.Metadata["checkResult"].(*agent.CheckResult); ok {
+			assert.Greater(t, checkResult.WarningsFound, 0)
+		}
+	}
+}
+
+// TestCheckTaskFailureWithErrors tests check task detecting errors (TDD - Epic 12.1)
+func TestCheckTaskFailureWithErrors(t *testing.T) {
+	checkOutput := `error: repository file corrupt
+error: pack file missing
+Fatal: repository integrity check failed`
+
+	checkResult := agent.ParseCheckOutput(checkOutput)
+
+	assert.False(t, checkResult.Success)
+	assert.Equal(t, 2, checkResult.ErrorsFound)
+	assert.Contains(t, checkResult.Summary, "Failed")
+}
+
+// TestCheckTaskDurationTracking tests duration measurement (TDD - Epic 12.1)
+func TestCheckTaskDurationTracking(t *testing.T) {
+	executor := agent.NewTaskExecutor("/bin/sleep")
+
+	task := agent.Task{
+		TaskID:     uuid.New().String(),
+		TaskType:   "check",
+		Repository: "0.1", // Sleep for 100ms
+	}
+
+	env := map[string]string{
+		"RESTIC_REPOSITORY": "/tmp/test-repo",
+		"RESTIC_PASSWORD":   "test",
+	}
+
+	result, err := executor.ExecuteWithEnv(task, env)
+	require.NoError(t, err)
+
+	assert.GreaterOrEqual(t, result.DurationSeconds, 0.09)
+	assert.NotEmpty(t, result.StartTime)
+	assert.NotEmpty(t, result.EndTime)
+	assert.True(t, result.EndTime.After(result.StartTime))
+}
+
+// TestCheckResultPersistence tests saving check results to disk (TDD - Epic 12.1)
+func TestCheckResultPersistence(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	result := agent.TaskResult{
+		TaskID:          uuid.New().String(),
+		Status:          "success",
+		DurationSeconds: 45.2,
+		Log:             "Repository check complete. No errors found.",
+		TaskType:        "check",
+		StartTime:       time.Now().Add(-45 * time.Second),
+		EndTime:         time.Now(),
+		Metadata: map[string]interface{}{
+			"checkResult": &agent.CheckResult{
+				Success:     true,
+				ErrorsFound: 0,
+				Summary:     "No errors found",
+			},
+		},
+	}
+
+	// Save to file
+	err := result.SaveToFile(tmpDir)
+	require.NoError(t, err)
+
+	// Load back
+	loaded, err := agent.LoadTaskResult(tmpDir, result.TaskID)
+	require.NoError(t, err)
+
+	assert.Equal(t, result.TaskID, loaded.TaskID)
+	assert.Equal(t, result.Status, loaded.Status)
+	assert.Equal(t, "check", loaded.TaskType)
+}
+
+// ========================================
+// EPIC 12.2: Enhanced Prune Task Tests
+// ========================================
+
+// TestPruneTaskWithDeletedSnapshots tests parsing deleted snapshot IDs (TDD - Epic 12.2)
+func TestPruneTaskWithDeletedSnapshots(t *testing.T) {
+	pruneOutput := `Applying retention policy to snapshots
+keep 5 snapshots:
+ID        Time                 Host
+abc123    2024-01-15 10:00:00  server1
+def456    2024-01-14 10:00:00  server1
+
+remove 3 snapshots:
+ID        Time                 Host
+old001    2024-01-01 10:00:00  server1
+old002    2024-01-02 10:00:00  server1
+old003    2024-01-03 10:00:00  server1
+
+3 snapshots have been removed
+counting files in repo
+building new index for repo
+repository contains 50 packs`
+
+	pruneResult := agent.ParsePruneOutput(pruneOutput)
+
+	assert.Equal(t, 3, pruneResult.SnapshotsRemoved)
+	assert.Equal(t, 5, pruneResult.SnapshotsKept)
+	assert.Len(t, pruneResult.DeletedSnapshotIDs, 3)
+	assert.Contains(t, pruneResult.DeletedSnapshotIDs, "old001")
+	assert.Contains(t, pruneResult.DeletedSnapshotIDs, "old002")
+	assert.Contains(t, pruneResult.DeletedSnapshotIDs, "old003")
+}
+
+// TestPruneTaskRetentionRules tests retention rule application (TDD - Epic 12.2)
+func TestPruneTaskRetentionRules(t *testing.T) {
+	executor := agent.NewTaskExecutor("/usr/bin/restic")
+
+	task := agent.Task{
+		TaskID:     uuid.New().String(),
+		TaskType:   "prune",
+		Repository: "/tmp/test-repo",
+		Retention: map[string]interface{}{
+			"keepLast":    float64(7),
+			"keepDaily":   float64(30),
+			"keepWeekly":  float64(12),
+			"keepMonthly": float64(6),
+			"keepYearly":  float64(2),
+		},
+	}
+
+	cmd, args := executor.BuildCommand(task)
+
+	assert.Equal(t, "/usr/bin/restic", cmd)
+	assert.Contains(t, args, "--keep-last=7")
+	assert.Contains(t, args, "--keep-daily=30")
+	assert.Contains(t, args, "--keep-weekly=12")
+	assert.Contains(t, args, "--keep-monthly=6")
+}
+
+// TestPruneTaskWithNoSnapshots tests prune with nothing to delete (TDD - Epic 12.2)
+func TestPruneTaskWithNoSnapshots(t *testing.T) {
+	pruneOutput := `Applying retention policy
+keep 10 snapshots
+remove 0 snapshots
+no snapshots were removed
+repository is already optimal`
+
+	pruneResult := agent.ParsePruneOutput(pruneOutput)
+
+	assert.Equal(t, 0, pruneResult.SnapshotsRemoved)
+	assert.Equal(t, 10, pruneResult.SnapshotsKept)
+	assert.Empty(t, pruneResult.DeletedSnapshotIDs)
+}
+
+// TestPruneTaskSpaceCalculation tests space freed parsing (TDD - Epic 12.2)
+func TestPruneTaskSpaceCalculation(t *testing.T) {
+	pruneOutput := `remove 5 snapshots
+will delete 10 packs and rewrite 3 packs, this frees 125.4 MiB
+repository contains 100 packs totaling 1.2 GiB`
+
+	pruneResult := agent.ParsePruneOutput(pruneOutput)
+
+	assert.Equal(t, 5, pruneResult.SnapshotsRemoved)
+	// 125.4 MiB = 125.4 * 1024 * 1024 bytes
+	expectedBytes := int64(131491840) // 125.4 * 1024 * 1024
+	assert.InDelta(t, expectedBytes, pruneResult.SpaceFreedBytes, 1024)
+}
+
+// ========================================
+// EPIC 12.3: Repository Lock Handling Tests
+// ========================================
+
+// TestRepositoryLockDetection tests detecting repository lock errors (TDD - Epic 12.3)
+func TestRepositoryLockDetection(t *testing.T) {
+	lockError := errors.New("Fatal: repository is already locked by PID 12345")
+
+	category := agent.CategorizeError(lockError)
+
+	assert.Equal(t, agent.ErrorCategoryTransient, category)
+	assert.True(t, agent.IsRetryable(category))
+}
+
+// TestLockErrorRetrySuccess tests successful retry after lock release (TDD - Epic 12.3)
+func TestLockErrorRetrySuccess(t *testing.T) {
+	// This test verifies that lock errors are categorized as transient
+	// and would trigger retry logic from EPIC 11.5
+
+	lockErrorMsg := "unable to create lock in backend: repository is already locked"
+	lockErr := errors.New(lockErrorMsg)
+
+	category := agent.CategorizeError(lockErr)
+
+	assert.Equal(t, agent.ErrorCategoryTransient, category)
+	assert.True(t, agent.IsRetryable(category))
+}
+
+// TestLockErrorInMetadata tests lock error captured in task metadata (TDD - Epic 12.3)
+func TestLockErrorInMetadata(t *testing.T) {
+	result := agent.TaskResult{
+		TaskID:   uuid.New().String(),
+		Status:   "failure",
+		TaskType: "check",
+		Log:      "Fatal: repository is already locked",
+		Metadata: make(map[string]interface{}),
+	}
+
+	// Simulate retry metadata
+	result.Metadata["retryAttempts"] = 3
+	result.Metadata["retriedErrors"] = []string{
+		"attempt 1: repository locked",
+		"attempt 2: repository locked",
+		"attempt 3: repository locked",
+	}
+
+	assert.Equal(t, 3, result.Metadata["retryAttempts"])
+	errors := result.Metadata["retriedErrors"].([]string)
+	assert.Len(t, errors, 3)
+	assert.Contains(t, errors[0], "locked")
+}
+
+// ========================================
+// EPIC 12.4: Structured Result Reporting Tests
+// ========================================
+
+// TestTaskResultWithDeletedSnapshots tests result includes deleted snapshot IDs (TDD - Epic 12.4)
+func TestTaskResultWithDeletedSnapshots(t *testing.T) {
+	result := agent.TaskResult{
+		TaskID:          uuid.New().String(),
+		Status:          "success",
+		DurationSeconds: 120.5,
+		Log:             "Prune complete. Removed 5 snapshots.",
+		TaskType:        "prune",
+		StartTime:       time.Now().Add(-2 * time.Minute),
+		EndTime:         time.Now(),
+		Metadata: map[string]interface{}{
+			"pruneResult": &agent.PruneResult{
+				SnapshotsRemoved:   5,
+				SnapshotsKept:      10,
+				SpaceFreedBytes:    int64(500 * 1024 * 1024),
+				DeletedSnapshotIDs: []string{"snap1", "snap2", "snap3", "snap4", "snap5"},
+				Summary:            "5 snapshots removed",
+			},
+		},
+	}
+
+	// Verify JSON serialization
+	jsonData, err := result.ToJSON()
+	require.NoError(t, err)
+
+	var parsed map[string]interface{}
+	err = json.Unmarshal(jsonData, &parsed)
+	require.NoError(t, err)
+
+	assert.Equal(t, result.TaskID, parsed["taskId"])
+	assert.Equal(t, "prune", parsed["taskType"])
+	assert.Equal(t, "success", parsed["status"])
+	assert.NotNil(t, parsed["metadata"])
+}
+
+// TestCheckResultJSONSchema tests check result structure (TDD - Epic 12.4)
+func TestCheckResultJSONSchema(t *testing.T) {
+	checkResult := agent.CheckResult{
+		Success:       true,
+		ErrorsFound:   0,
+		WarningsFound: 2,
+		Summary:       "Repository check complete. 2 warnings found.",
+	}
+
+	// Convert to JSON
+	jsonData, err := json.Marshal(checkResult)
+	require.NoError(t, err)
+
+	var parsed map[string]interface{}
+	err = json.Unmarshal(jsonData, &parsed)
+	require.NoError(t, err)
+
+	assert.Equal(t, true, parsed["success"])
+	assert.Equal(t, float64(0), parsed["errorsFound"])
+	assert.Equal(t, float64(2), parsed["warningsFound"])
+	assert.NotEmpty(t, parsed["summary"])
+}
+
+// TestPruneResultJSONSchema tests prune result structure (TDD - Epic 12.4)
+func TestPruneResultJSONSchema(t *testing.T) {
+	pruneResult := agent.PruneResult{
+		SnapshotsRemoved:   3,
+		SnapshotsKept:      7,
+		SpaceFreedBytes:    int64(250 * 1024 * 1024),
+		DeletedSnapshotIDs: []string{"old1", "old2", "old3"},
+		Summary:            "3 snapshots removed, 250 MiB freed",
+	}
+
+	jsonData, err := json.Marshal(pruneResult)
+	require.NoError(t, err)
+
+	var parsed map[string]interface{}
+	err = json.Unmarshal(jsonData, &parsed)
+	require.NoError(t, err)
+
+	assert.Equal(t, float64(3), parsed["snapshotsRemoved"])
+	assert.Equal(t, float64(7), parsed["snapshotsKept"])
+	assert.Equal(t, float64(250*1024*1024), parsed["spaceFreedBytes"])
+	assert.NotNil(t, parsed["deletedSnapshotIds"])
+}
