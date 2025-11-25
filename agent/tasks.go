@@ -11,12 +11,16 @@ import (
 
 // Task represents a backup task assigned to the agent
 type Task struct {
-	TaskID       string    `json:"taskId"`
-	PolicyID     string    `json:"policyId"`
-	TaskType     string    `json:"taskType"` // "backup", "check", "prune"
-	Repository   string    `json:"repository"`
-	CreatedAt    time.Time `json:"createdAt"`
-	ScheduledFor time.Time `json:"scheduledFor,omitempty"`
+	TaskID          string                 `json:"taskId"`
+	PolicyID        string                 `json:"policyId"`
+	TaskType        string                 `json:"taskType"` // "backup", "check", "prune"
+	Repository      string                 `json:"repository"`
+	IncludePaths    map[string]interface{} `json:"includePaths,omitempty"`
+	ExcludePaths    map[string]interface{} `json:"excludePaths,omitempty"`
+	Retention       map[string]interface{} `json:"retention,omitempty"`
+	ExecutionParams map[string]interface{} `json:"executionParams,omitempty"`
+	CreatedAt       time.Time              `json:"createdAt"`
+	ScheduledFor    time.Time              `json:"scheduledFor,omitempty"`
 }
 
 // TasksResponse represents the response from GET /agents/{id}/tasks

@@ -15,6 +15,7 @@ type PollingLoop struct {
 	taskClient  *TaskClient
 	queue       *TaskQueue
 	metrics     *LoopMetrics
+	executor    *TaskExecutor
 	version     string
 	stopChan    chan struct{}
 	stoppedChan chan struct{}
@@ -178,6 +179,16 @@ func (p *PollingLoop) LogStatus() {
 // SetLogPrefix sets the log prefix (useful for testing)
 func (p *PollingLoop) SetLogPrefix(prefix string) {
 	p.logPrefix = prefix
+}
+
+// SetExecutor sets the task executor
+func (p *PollingLoop) SetExecutor(executor *TaskExecutor) {
+	p.executor = executor
+}
+
+// GetExecutor returns the task executor
+func (p *PollingLoop) GetExecutor() *TaskExecutor {
+	return p.executor
 }
 
 // FormatMetrics returns a formatted string of current metrics
