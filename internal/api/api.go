@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/example/restic-monitor/internal/config"
+	"github.com/example/restic-monitor/internal/scheduler"
 	"github.com/example/restic-monitor/internal/store"
 )
 
@@ -38,17 +39,29 @@ type Monitor interface {
 	TriggerCheck(targetName string)
 }
 
+// Scheduler provides access to scheduler status and metrics
+type Scheduler interface {
+	IsRunning() bool
+	GetMetrics() scheduler.MetricsSnapshot
+}
+
 // API exposes backup status endpoints.
 type API struct {
 	config    config.Config
 	store     *store.Store
 	monitor   Monitor
+	scheduler Scheduler
 	staticDir string
 }
 
 // New constructs a new API handler.
 func New(cfg config.Config, st *store.Store, mon Monitor, staticDir string) *API {
-	return &API{config: cfg, store: st, monitor: mon, staticDir: staticDir}
+	return &API{config: cfg, store: st, monitor: mon, scheduler: nil, staticDir: staticDir}
+}
+
+// NewWithScheduler constructs a new API handler with scheduler support.
+func NewWithScheduler(cfg config.Config, st *store.Store, mon Monitor, sched Scheduler, staticDir string) *API {
+	return &API{config: cfg, store: st, monitor: mon, scheduler: sched, staticDir: staticDir}
 }
 
 // Handler registers routes.
@@ -63,6 +76,11 @@ func (a *API) Handler() http.Handler {
 	// Policy API routes
 	mux.HandleFunc("/policies/", a.handlePolicies) // Handles GET/PUT/DELETE for /policies/{id}
 	mux.HandleFunc("/policies", a.handlePolicies)  // Handles POST/GET for /policies
+
+	// Scheduler API routes
+	if a.scheduler != nil {
+		mux.HandleFunc("/scheduler/status", a.handleSchedulerStatus)
+	}
 
 	// API routes under /api/v1/
 	mux.HandleFunc("/api/v1/status", a.handleStatus)

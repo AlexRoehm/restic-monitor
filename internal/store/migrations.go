@@ -108,6 +108,8 @@ func GetAllMigrations(defaultTenantID uuid.UUID) []Migration {
 		GetMigration001CreateAgentTables(defaultTenantID),
 		GetMigration002AddHeartbeatFields(),
 		GetMigration003AddPolicyFields(),
+		GetMigration004CreatePolicyTaskStates(),
+		GetMigration005AddScheduleTypes(),
 	}
 }
 
@@ -243,6 +245,59 @@ func GetMigration003AddPolicyFields() Migration {
 			// GORM AutoMigrate handles adding new columns gracefully
 			if err := tx.AutoMigrate(&Policy{}); err != nil {
 				return fmt.Errorf("adding new fields to policies: %w", err)
+			}
+			return nil
+		},
+	}
+}
+
+// GetMigration004CreatePolicyTaskStates creates the policy_task_states table for scheduler
+func GetMigration004CreatePolicyTaskStates() Migration {
+	return Migration{
+		Version:     "004",
+		Description: "Create policy_task_states table for tracking scheduler state",
+		Up: func(tx *gorm.DB) error {
+			// Create policy_task_states table
+			err := tx.Exec(`
+				CREATE TABLE IF NOT EXISTS policy_task_states (
+					policy_id TEXT NOT NULL,
+					task_type TEXT NOT NULL DEFAULT 'backup',
+					last_run TIMESTAMP,
+					next_run TIMESTAMP,
+					created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					PRIMARY KEY (policy_id, task_type),
+					FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE
+				)
+			`).Error
+			if err != nil {
+				return fmt.Errorf("creating policy_task_states table: %w", err)
+			}
+
+			// Create index on next_run for efficient queries
+			err = tx.Exec(`
+				CREATE INDEX IF NOT EXISTS idx_policy_task_states_next_run 
+				ON policy_task_states(next_run)
+			`).Error
+			if err != nil {
+				return fmt.Errorf("creating index on next_run: %w", err)
+			}
+
+			return nil
+		},
+	}
+}
+
+// GetMigration005AddScheduleTypes adds check_schedule and prune_schedule fields to policies
+func GetMigration005AddScheduleTypes() Migration {
+	return Migration{
+		Version:     "005",
+		Description: "Add check_schedule and prune_schedule fields to policies table for multi-type scheduling",
+		Up: func(tx *gorm.DB) error {
+			// Add new columns to policies table
+			// GORM AutoMigrate handles adding new columns gracefully
+			if err := tx.AutoMigrate(&Policy{}); err != nil {
+				return fmt.Errorf("adding schedule type fields to policies: %w", err)
 			}
 			return nil
 		},

@@ -46,7 +46,9 @@ type Policy struct {
 	TenantID           uuid.UUID `gorm:"not null;index;uniqueIndex:idx_policy_name_tenant" json:"tenant_id"`
 	Name               string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_policy_name_tenant" json:"name"`
 	Description        *string   `gorm:"type:varchar(500)" json:"description,omitempty"`
-	Schedule           string    `gorm:"type:varchar(255);not null" json:"schedule"` // cron expression
+	Schedule           string    `gorm:"type:varchar(255);not null" json:"schedule"`        // backup schedule (cron/interval)
+	CheckSchedule      *string   `gorm:"type:varchar(255)" json:"check_schedule,omitempty"` // check schedule (optional)
+	PruneSchedule      *string   `gorm:"type:varchar(255)" json:"prune_schedule,omitempty"` // prune schedule (optional)
 	IncludePaths       JSONB     `gorm:"serializer:json;not null" json:"include_paths"`
 	ExcludePaths       JSONB     `gorm:"serializer:json" json:"exclude_paths,omitempty"`
 	RepositoryURL      string    `gorm:"type:text;not null" json:"repository_url"`
@@ -55,7 +57,7 @@ type Policy struct {
 	RetentionRules     JSONB     `gorm:"serializer:json;not null" json:"retention_rules"`
 	BandwidthLimitKBps *int      `json:"bandwidth_limit_kbps,omitempty"`
 	ParallelFiles      *int      `json:"parallel_files,omitempty"`
-	Enabled            bool      `gorm:"not null;default:true" json:"enabled"`
+	Enabled            bool      `gorm:"not null" json:"enabled"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }

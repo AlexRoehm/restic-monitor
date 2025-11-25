@@ -287,16 +287,25 @@ func (s *Store) UpdateAgentStatus(ctx context.Context, id uuid.UUID, status stri
 // CreatePolicy creates a new policy
 func (s *Store) CreatePolicy(ctx context.Context, policy *Policy) error {
 	policy.TenantID = s.tenantID
-	return s.db.WithContext(ctx).Create(policy).Error
+	// Use Select to ensure all fields including zero values (like Enabled=false) are saved
+	return s.db.WithContext(ctx).Select("*").Create(policy).Error
+}
+
+// PolicyFilter contains filters for listing policies
+type PolicyFilter struct {
+	Enabled *bool
 }
 
 // ListPolicies returns all policies for this tenant
-func (s *Store) ListPolicies(ctx context.Context) ([]Policy, error) {
+func (s *Store) ListPolicies(ctx context.Context, filter ...PolicyFilter) ([]Policy, error) {
 	var policies []Policy
-	err := s.db.WithContext(ctx).
-		Where("tenant_id = ?", s.tenantID).
-		Order("name asc").
-		Find(&policies).Error
+	query := s.db.WithContext(ctx).Where("tenant_id = ?", s.tenantID)
+
+	if len(filter) > 0 && filter[0].Enabled != nil {
+		query = query.Where("enabled = ?", *filter[0].Enabled)
+	}
+
+	err := query.Order("name asc").Find(&policies).Error
 	return policies, err
 }
 
@@ -307,6 +316,43 @@ func (s *Store) GetPolicy(ctx context.Context, id uuid.UUID) (Policy, error) {
 		Where("id = ? AND tenant_id = ?", id, s.tenantID).
 		First(&policy).Error
 	return policy, err
+}
+
+// AssignPolicyToAgent assigns a policy to an agent
+func (s *Store) AssignPolicyToAgent(ctx context.Context, policyID, agentID uuid.UUID) error {
+	link := AgentPolicyLink{
+		AgentID:  agentID,
+		PolicyID: policyID,
+	}
+	return s.db.WithContext(ctx).Create(&link).Error
+}
+
+// GetPolicyAgents retrieves all agents assigned to a policy
+func (s *Store) GetPolicyAgents(ctx context.Context, policyID uuid.UUID) ([]Agent, error) {
+	var agents []Agent
+	err := s.db.WithContext(ctx).
+		Joins("JOIN agent_policy_links ON agents.id = agent_policy_links.agent_id").
+		Where("agent_policy_links.policy_id = ? AND agents.tenant_id = ?", policyID, s.tenantID).
+		Find(&agents).Error
+	return agents, err
+}
+
+// Task-related methods
+
+// CreateTask creates a new task
+func (s *Store) CreateTask(ctx context.Context, task *Task) error {
+	task.TenantID = s.tenantID
+	return s.db.WithContext(ctx).Create(task).Error
+}
+
+// GetPendingTasks retrieves all pending tasks for an agent
+func (s *Store) GetPendingTasks(ctx context.Context, agentID uuid.UUID) ([]Task, error) {
+	var tasks []Task
+	err := s.db.WithContext(ctx).
+		Where("agent_id = ? AND status = ? AND tenant_id = ?", agentID, "pending", s.tenantID).
+		Order("created_at asc").
+		Find(&tasks).Error
+	return tasks, err
 }
 
 // BackupRun-related methods
