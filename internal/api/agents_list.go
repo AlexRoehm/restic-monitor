@@ -40,6 +40,24 @@ func (a *API) handleAgentsRouter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// /agents/{id}/task-results -> task result submission handler (EPIC 13.2)
+	if len(parts) == 3 && parts[0] == "agents" && parts[2] == "task-results" && r.Method == http.MethodPost {
+		a.handleTaskResults(w, r)
+		return
+	}
+
+	// /agents/{id}/backup-runs/{runId} -> get single backup run with logs (EPIC 13.6)
+	if len(parts) == 4 && parts[0] == "agents" && parts[2] == "backup-runs" && r.Method == http.MethodGet {
+		a.handleGetBackupRun(w, r)
+		return
+	}
+
+	// /agents/{id}/backup-runs -> get backup runs list (EPIC 13.6)
+	if len(parts) == 3 && parts[0] == "agents" && parts[2] == "backup-runs" && r.Method == http.MethodGet {
+		a.handleGetBackupRuns(w, r)
+		return
+	}
+
 	// /agents/{id} -> GET handler
 	if len(parts) == 2 && parts[0] == "agents" && r.Method == http.MethodGet {
 		a.handleGetAgents(w, r)

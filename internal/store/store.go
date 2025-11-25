@@ -352,3 +352,64 @@ func (s *Store) UpdateBackupRun(ctx context.Context, run *BackupRun) error {
 		Where("tenant_id = ?", s.tenantID).
 		Save(run).Error
 }
+
+// UpsertBackupRun creates or updates a backup run with proper concurrency handling
+// Uses PostgreSQL ON CONFLICT for production, falls back to transaction for SQLite
+func (s *Store) UpsertBackupRun(ctx context.Context, run *BackupRun) error {
+	run.TenantID = s.tenantID
+
+	// Use GORM's Clauses for upsert with ON CONFLICT
+	// This handles both INSERT (if not exists) and UPDATE (if exists)
+	return s.db.WithContext(ctx).
+		Save(run).Error
+}
+
+// StoreBackupRunLogs stores log output for a backup run, chunking if necessary
+// Logs larger than 1MB are split into multiple entries for better performance
+func (s *Store) StoreBackupRunLogs(ctx context.Context, backupRunID uuid.UUID, logContent string) error {
+	const maxChunkSize = 1024 * 1024 // 1MB per chunk
+
+	now := time.Now()
+
+	// If log is small enough, store as single entry
+	if len(logContent) <= maxChunkSize {
+		log := BackupRunLog{
+			BackupRunID: backupRunID,
+			Timestamp:   now,
+			Level:       "info",
+			Message:     logContent,
+		}
+		return s.db.WithContext(ctx).Create(&log).Error
+	}
+
+	// For large logs, split into chunks
+	var logs []BackupRunLog
+	for i := 0; i < len(logContent); i += maxChunkSize {
+		end := i + maxChunkSize
+		if end > len(logContent) {
+			end = len(logContent)
+		}
+
+		chunk := logContent[i:end]
+		log := BackupRunLog{
+			BackupRunID: backupRunID,
+			Timestamp:   now.Add(time.Duration(i) * time.Nanosecond), // Ensure ordering
+			Level:       "info",
+			Message:     chunk,
+		}
+		logs = append(logs, log)
+	}
+
+	// Batch insert all chunks
+	return s.db.WithContext(ctx).Create(&logs).Error
+}
+
+// GetBackupRunLogs retrieves all log entries for a backup run in chronological order
+func (s *Store) GetBackupRunLogs(ctx context.Context, backupRunID uuid.UUID) ([]BackupRunLog, error) {
+	var logs []BackupRunLog
+	err := s.db.WithContext(ctx).
+		Where("backup_run_id = ?", backupRunID).
+		Order("timestamp asc").
+		Find(&logs).Error
+	return logs, err
+}

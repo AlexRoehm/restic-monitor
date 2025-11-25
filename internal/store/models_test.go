@@ -1,8 +1,10 @@
 package store_test
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -479,6 +481,75 @@ func TestModelCRUD(t *testing.T) {
 		assert.Equal(t, 1000, *retrieved.FilesNew)
 	})
 
+	t.Run("BackupRun Upsert", func(t *testing.T) {
+		// Create agent and policy first
+		agent := store.Agent{
+			TenantID: tenantID,
+			Hostname: "upsert-test",
+			OS:       "linux",
+			Arch:     "amd64",
+			Version:  "1.0.0",
+			Status:   "online",
+		}
+		db.Create(&agent)
+
+		policy := store.Policy{
+			TenantID:       tenantID,
+			Name:           "Upsert Policy",
+			Schedule:       "0 2 * * *",
+			IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+			RepositoryURL:  "s3:bucket/path",
+			RepositoryType: "s3",
+			RetentionRules: store.JSONB{"keep_daily": 7},
+			Enabled:        true,
+		}
+		db.Create(&policy)
+
+		// Test upsert - first insert
+		taskID := uuid.New()
+		now := time.Now()
+		duration := 120.5
+		snapshotID := "abc123"
+
+		run := store.BackupRun{
+			ID:              taskID,
+			TenantID:        tenantID,
+			AgentID:         agent.ID,
+			PolicyID:        policy.ID,
+			StartTime:       now,
+			EndTime:         &now,
+			Status:          "success",
+			DurationSeconds: &duration,
+			SnapshotID:      &snapshotID,
+		}
+
+		err := db.Save(&run).Error
+		require.NoError(t, err)
+
+		// Verify created
+		var retrieved store.BackupRun
+		err = db.First(&retrieved, "id = ?", taskID).Error
+		require.NoError(t, err)
+		assert.Equal(t, "success", retrieved.Status)
+		assert.Equal(t, "abc123", *retrieved.SnapshotID)
+
+		// Test upsert - update existing
+		errorMsg := "connection failed"
+		run.Status = "failed"
+		run.ErrorMessage = &errorMsg
+		run.SnapshotID = nil
+
+		err = db.Save(&run).Error
+		require.NoError(t, err)
+
+		// Verify updated
+		err = db.First(&retrieved, "id = ?", taskID).Error
+		require.NoError(t, err)
+		assert.Equal(t, "failed", retrieved.Status)
+		assert.Equal(t, "connection failed", *retrieved.ErrorMessage)
+		assert.Nil(t, retrieved.SnapshotID)
+	})
+
 	t.Run("AgentPolicyLink CRUD", func(t *testing.T) {
 		agent := store.Agent{
 			TenantID: tenantID,
@@ -900,6 +971,197 @@ func TestAgentPolicyLinkMultipleAssignments(t *testing.T) {
 		db.Model(&store.AgentPolicyLink{}).Where("policy_id = ?", policy.ID).Count(&count)
 		assert.Equal(t, int64(3), count, "Policy should be assigned to 3 agents")
 	})
+}
+
+// TestStoreBackupRunLogs tests storing log entries for backup runs (TDD - Epic 13.4)
+func TestStoreBackupRunLogs(t *testing.T) {
+	st, err := store.NewWithTenant(":memory:", uuid.New())
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create agent and policy
+	agent := &store.Agent{
+		TenantID: st.GetTenantID(),
+		Hostname: "log-test",
+		OS:       "linux",
+		Arch:     "amd64",
+		Version:  "1.0.0",
+		Status:   "online",
+	}
+	err = st.CreateAgent(ctx, agent)
+	require.NoError(t, err)
+
+	policy := &store.Policy{
+		TenantID:       st.GetTenantID(),
+		Name:           "Log Test Policy",
+		Schedule:       "0 0 * * *",
+		IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+		RepositoryURL:  "s3://bucket/repo",
+		RepositoryType: "s3",
+		RetentionRules: store.JSONB{"keepLast": 7},
+		Enabled:        true,
+	}
+	err = st.CreatePolicy(ctx, policy)
+	require.NoError(t, err)
+
+	// Create backup run
+	backupRun := &store.BackupRun{
+		TenantID:  st.GetTenantID(),
+		AgentID:   agent.ID,
+		PolicyID:  policy.ID,
+		StartTime: time.Now(),
+		Status:    "running",
+	}
+	err = st.UpsertBackupRun(ctx, backupRun)
+	require.NoError(t, err)
+
+	// Test storing small log (single entry)
+	smallLog := "Starting backup...\nProcessing files...\nBackup complete!"
+	err = st.StoreBackupRunLogs(ctx, backupRun.ID, smallLog)
+	require.NoError(t, err)
+
+	// Retrieve logs
+	logs, err := st.GetBackupRunLogs(ctx, backupRun.ID)
+	require.NoError(t, err)
+	assert.Len(t, logs, 1, "Should have 1 log entry for small log")
+	assert.Equal(t, smallLog, logs[0].Message)
+	assert.Equal(t, "info", logs[0].Level)
+}
+
+// TestStoreBackupRunLogsChunked tests chunking large logs (TDD - Epic 13.4)
+func TestStoreBackupRunLogsChunked(t *testing.T) {
+	st, err := store.NewWithTenant(":memory:", uuid.New())
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create agent and policy
+	agent := &store.Agent{
+		TenantID: st.GetTenantID(),
+		Hostname: "chunk-test",
+		OS:       "linux",
+		Arch:     "amd64",
+		Version:  "1.0.0",
+		Status:   "online",
+	}
+	err = st.CreateAgent(ctx, agent)
+	require.NoError(t, err)
+
+	policy := &store.Policy{
+		TenantID:       st.GetTenantID(),
+		Name:           "Chunk Test Policy",
+		Schedule:       "0 0 * * *",
+		IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+		RepositoryURL:  "s3://bucket/repo",
+		RepositoryType: "s3",
+		RetentionRules: store.JSONB{"keepLast": 7},
+		Enabled:        true,
+	}
+	err = st.CreatePolicy(ctx, policy)
+	require.NoError(t, err)
+
+	// Create backup run
+	backupRun := &store.BackupRun{
+		TenantID:  st.GetTenantID(),
+		AgentID:   agent.ID,
+		PolicyID:  policy.ID,
+		StartTime: time.Now(),
+		Status:    "running",
+	}
+	err = st.UpsertBackupRun(ctx, backupRun)
+	require.NoError(t, err)
+
+	// Create a large log (>1MB to trigger chunking)
+	largeLog := strings.Repeat("This is a log line that will be repeated many times to create a large log.\n", 20000)
+	assert.Greater(t, len(largeLog), 1024*1024, "Log should be >1MB")
+
+	// Store large log
+	err = st.StoreBackupRunLogs(ctx, backupRun.ID, largeLog)
+	require.NoError(t, err)
+
+	// Retrieve logs
+	logs, err := st.GetBackupRunLogs(ctx, backupRun.ID)
+	require.NoError(t, err)
+	assert.Greater(t, len(logs), 1, "Large log should be chunked into multiple entries")
+
+	// Reconstruct full log
+	var reconstructed strings.Builder
+	for _, log := range logs {
+		reconstructed.WriteString(log.Message)
+	}
+	assert.Equal(t, largeLog, reconstructed.String(), "Reconstructed log should match original")
+}
+
+// TestGetBackupRunLogsOrdering tests log entries are returned in correct order (TDD - Epic 13.4)
+func TestGetBackupRunLogsOrdering(t *testing.T) {
+	st, err := store.NewWithTenant(":memory:", uuid.New())
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create agent and policy
+	agent := &store.Agent{
+		TenantID: st.GetTenantID(),
+		Hostname: "order-test",
+		OS:       "linux",
+		Arch:     "amd64",
+		Version:  "1.0.0",
+		Status:   "online",
+	}
+	err = st.CreateAgent(ctx, agent)
+	require.NoError(t, err)
+
+	policy := &store.Policy{
+		TenantID:       st.GetTenantID(),
+		Name:           "Order Test Policy",
+		Schedule:       "0 0 * * *",
+		IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+		RepositoryURL:  "s3://bucket/repo",
+		RepositoryType: "s3",
+		RetentionRules: store.JSONB{"keepLast": 7},
+		Enabled:        true,
+	}
+	err = st.CreatePolicy(ctx, policy)
+	require.NoError(t, err)
+
+	// Create backup run
+	backupRun := &store.BackupRun{
+		TenantID:  st.GetTenantID(),
+		AgentID:   agent.ID,
+		PolicyID:  policy.ID,
+		StartTime: time.Now(),
+		Status:    "running",
+	}
+	err = st.UpsertBackupRun(ctx, backupRun)
+	require.NoError(t, err)
+
+	// Store log in chunks with small delays
+	log1 := "First chunk"
+	log2 := "Second chunk"
+	log3 := "Third chunk"
+
+	time.Sleep(1 * time.Millisecond)
+	err = st.StoreBackupRunLogs(ctx, backupRun.ID, log1)
+	require.NoError(t, err)
+
+	time.Sleep(1 * time.Millisecond)
+	err = st.StoreBackupRunLogs(ctx, backupRun.ID, log2)
+	require.NoError(t, err)
+
+	time.Sleep(1 * time.Millisecond)
+	err = st.StoreBackupRunLogs(ctx, backupRun.ID, log3)
+	require.NoError(t, err)
+
+	// Retrieve logs
+	logs, err := st.GetBackupRunLogs(ctx, backupRun.ID)
+	require.NoError(t, err)
+	assert.Len(t, logs, 3, "Should have 3 log entries")
+
+	// Verify ordering (should be chronological)
+	assert.Contains(t, logs[0].Message, "First")
+	assert.Contains(t, logs[1].Message, "Second")
+	assert.Contains(t, logs[2].Message, "Third")
 }
 
 // Helper functions for pointers
