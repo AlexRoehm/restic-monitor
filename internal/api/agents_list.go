@@ -28,6 +28,18 @@ func (a *API) handleAgentsRouter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// /agents/{id}/tasks -> tasks handler (EPIC 10.2)
+	if len(parts) == 3 && parts[0] == "agents" && parts[2] == "tasks" && r.Method == http.MethodGet {
+		a.handleGetAgentTasks(w, r)
+		return
+	}
+
+	// /agents/{id}/tasks/{taskId}/ack -> task acknowledgment handler (EPIC 10.4)
+	if len(parts) == 5 && parts[0] == "agents" && parts[2] == "tasks" && parts[4] == "ack" && r.Method == http.MethodPost {
+		a.handleAcknowledgeTask(w, r)
+		return
+	}
+
 	// /agents/{id} -> GET handler
 	if len(parts) == 2 && parts[0] == "agents" && r.Method == http.MethodGet {
 		a.handleGetAgents(w, r)

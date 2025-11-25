@@ -175,6 +175,42 @@ func (j *JSONB) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, j)
 }
 
+// Task represents a task (backup, check, prune) assigned to an agent
+type Task struct {
+	ID              uuid.UUID  `gorm:"primaryKey" json:"id"`
+	TenantID        uuid.UUID  `gorm:"not null;index" json:"tenant_id"`
+	AgentID         uuid.UUID  `gorm:"not null;index" json:"agent_id"`
+	PolicyID        uuid.UUID  `gorm:"not null;index" json:"policy_id"`
+	TaskType        string     `gorm:"type:varchar(50);not null;index" json:"task_type"` // backup, check, prune
+	Status          string     `gorm:"type:varchar(50);not null;index" json:"status"`    // pending, assigned, in-progress, completed, failed
+	Repository      string     `gorm:"type:text;not null" json:"repository"`
+	IncludePaths    JSONB      `gorm:"serializer:json" json:"include_paths,omitempty"`
+	ExcludePaths    JSONB      `gorm:"serializer:json" json:"exclude_paths,omitempty"`
+	Retention       JSONB      `gorm:"serializer:json" json:"retention,omitempty"`
+	ExecutionParams JSONB      `gorm:"serializer:json" json:"execution_params,omitempty"`
+	ScheduledFor    *time.Time `gorm:"index" json:"scheduled_for,omitempty"`
+	AssignedAt      *time.Time `json:"assigned_at,omitempty"`
+	AcknowledgedAt  *time.Time `json:"acknowledged_at,omitempty"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	ErrorMessage    *string    `gorm:"type:text" json:"error_message,omitempty"`
+	CreatedAt       time.Time  `gorm:"index" json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+// TableName specifies the table name for Task
+func (Task) TableName() string {
+	return "tasks"
+}
+
+// BeforeCreate hook to generate UUID if not set
+func (t *Task) BeforeCreate(tx *gorm.DB) error {
+	if t.ID == uuid.Nil {
+		t.ID = uuid.New()
+	}
+	return nil
+}
+
 // MigrateModels runs GORM automigration for all models
 func MigrateModels(db *gorm.DB) error {
 	return db.AutoMigrate(
@@ -183,5 +219,6 @@ func MigrateModels(db *gorm.DB) error {
 		&AgentPolicyLink{},
 		&BackupRun{},
 		&BackupRunLog{},
+		&Task{},
 	)
 }
