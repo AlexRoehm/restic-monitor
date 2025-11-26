@@ -13,6 +13,10 @@ export default defineConfig({
       '/agents': {
         target: 'http://localhost:4711',
         changeOrigin: true,
+      },
+      '/policies': {
+        target: 'http://localhost:4711',
+        changeOrigin: true,
       }
     }
   }

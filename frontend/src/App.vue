@@ -142,6 +142,215 @@
         </div>
       </div>
 
+      <!-- Policies Section -->
+      <div class="mb-8">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-2xl font-bold flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Backup Policies
+          </h2>
+          <button @click="openCreatePolicyModal" class="btn btn-primary btn-sm gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            Create Policy
+          </button>
+        </div>
+        
+        <!-- Empty State -->
+        <div v-if="policies.length === 0" class="card bg-base-100 shadow-lg border border-base-300">
+          <div class="card-body items-center text-center py-12">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 text-base-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <h3 class="text-xl font-bold mb-2">No Backup Policies</h3>
+            <p class="text-base-content/60 mb-4">Create your first backup policy to get started</p>
+            <button @click="openCreatePolicyModal" class="btn btn-primary gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+              </svg>
+              Create Your First Policy
+            </button>
+          </div>
+        </div>
+        
+        <!-- Policies Grid -->
+        <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div v-for="policy in policies" :key="policy.id" class="card bg-base-100 shadow-lg border border-base-300">
+            <div class="card-body p-4">
+              <div class="flex items-start justify-between mb-3">
+                <div class="flex-1">
+                  <h3 class="font-bold text-lg">{{ policy.name }}</h3>
+                  <p v-if="policy.description" class="text-sm text-base-content/60 mt-1">{{ policy.description }}</p>
+                </div>
+                <div class="badge badge-lg" :class="getPolicyStatusClass(policy)">
+                  {{ policy.enabled ? '✓ Enabled' : 'Disabled' }}
+                </div>
+              </div>
+              
+              <div class="divider my-2"></div>
+              
+              <div class="space-y-2 text-sm">
+                <!-- Schedule -->
+                <div class="flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span class="opacity-70">Schedule:</span>
+                  <span class="font-semibold">{{ formatCron(policy.schedule) }}</span>
+                </div>
+                
+                <!-- Repository -->
+                <div class="flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+                  </svg>
+                  <span class="opacity-70">Repository:</span>
+                  <span class="font-mono text-xs">{{ policy.repository_type }}</span>
+                </div>
+                
+                <!-- Retention -->
+                <div class="flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                  </svg>
+                  <span class="opacity-70">Retention:</span>
+                  <span class="font-semibold">
+                    {{ policy.retention_rules?.keep_last || 0 }} last, 
+                    {{ policy.retention_rules?.keep_daily || 0 }} daily
+                  </span>
+                </div>
+                
+                <!-- Paths -->
+                <div class="flex items-start gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-info mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  <span class="opacity-70">Paths:</span>
+                  <span class="font-mono text-xs">{{ policy.include_paths?.paths?.length || 0 }} included</span>
+                </div>
+              </div>
+              
+              <div class="card-actions justify-end mt-4 gap-2">
+                <button @click="openAssignModal(policy)" class="btn btn-sm btn-ghost gap-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  Assign
+                </button>
+                <button @click="openDetachModal(policy)" class="btn btn-sm btn-ghost gap-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                  </svg>
+                  Detach
+                </button>
+                <button @click="openEditPolicyModal(policy)" class="btn btn-sm btn-ghost gap-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                  Edit
+                </button>
+                <button @click="confirmDeletePolicy(policy)" class="btn btn-sm btn-error btn-ghost gap-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Backup Runs Section -->
+      <div class="mb-8">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-2xl font-bold flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            Recent Backup Runs
+          </h2>
+          <div class="flex gap-2">
+            <select v-model="runsFilter.status" class="select select-bordered select-sm">
+              <option value="">All Statuses</option>
+              <option value="success">Success</option>
+              <option value="failed">Failed</option>
+              <option value="running">Running</option>
+            </select>
+            <select v-model="runsFilter.agentId" class="select select-bordered select-sm">
+              <option value="">All Agents</option>
+              <option v-for="agent in agents" :key="agent.id" :value="agent.id">{{ agent.hostname }}</option>
+            </select>
+          </div>
+        </div>
+        
+        <div v-if="loadingRuns" class="flex justify-center py-12">
+          <span class="loading loading-spinner loading-lg"></span>
+        </div>
+        
+        <div v-else-if="backupRuns.length === 0" class="card bg-base-100 shadow-lg border border-base-300">
+          <div class="card-body items-center text-center py-12">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 text-base-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            <h3 class="text-xl font-bold mb-2">No Backup Runs</h3>
+            <p class="text-base-content/60">Backup runs will appear here once agents start executing policies</p>
+          </div>
+        </div>
+        
+        <div v-else class="overflow-x-auto">
+          <table class="table table-zebra">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Agent</th>
+                <th>Policy</th>
+                <th>Start Time</th>
+                <th>Duration</th>
+                <th>Snapshot ID</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="run in backupRuns" :key="run.id" class="hover">
+                <td>
+                  <div class="badge" :class="getRunStatusClass(run.status)">
+                    {{ run.status }}
+                  </div>
+                </td>
+                <td>
+                  <span class="font-mono text-sm">{{ getAgentName(run.agent_id) }}</span>
+                </td>
+                <td>
+                  <span class="font-mono text-sm">{{ getPolicyName(run.policy_id) }}</span>
+                </td>
+                <td>{{ formatTime(run.start_time) }}</td>
+                <td>
+                  <span v-if="run.duration_seconds">{{ formatDuration(run.duration_seconds) }}</span>
+                  <span v-else class="text-base-content/40">-</span>
+                </td>
+                <td>
+                  <code v-if="run.snapshot_id" class="text-xs bg-base-200 px-2 py-1 rounded">{{ run.snapshot_id.substring(0, 8) }}</code>
+                  <span v-else class="text-base-content/40">-</span>
+                </td>
+                <td>
+                  <button @click="viewRunDetails(run)" class="btn btn-ghost btn-xs">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    Details
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- Loading State -->
       <div v-if="loading" class="flex flex-col justify-center items-center h-96">
         <span class="loading loading-bars loading-lg text-primary"></span>
@@ -463,17 +672,494 @@
         <button>close</button>
       </form>
     </dialog>
+
+    <!-- Create Policy Modal -->
+    <dialog ref="createPolicyModal" class="modal">
+      <div class="modal-box max-w-4xl">
+        <form method="dialog">
+          <button class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">✕</button>
+        </form>
+        <h3 class="font-bold text-lg mb-4">Create Backup Policy</h3>
+        
+        <div class="space-y-4">
+          <!-- Name & Description -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Policy Name *</span>
+              </label>
+              <input 
+                v-model="newPolicy.name" 
+                type="text" 
+                placeholder="e.g., daily-backup" 
+                class="input input-bordered" 
+                required
+              />
+            </div>
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Schedule (Cron) *</span>
+              </label>
+              <input 
+                v-model="newPolicy.schedule" 
+                type="text" 
+                placeholder="0 2 * * * or every 6h" 
+                class="input input-bordered" 
+                required
+              />
+            </div>
+          </div>
+
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Description</span>
+            </label>
+            <textarea 
+              v-model="newPolicy.description" 
+              class="textarea textarea-bordered" 
+              placeholder="Optional description"
+              rows="2"
+            ></textarea>
+          </div>
+
+          <!-- Repository -->
+          <div class="divider">Repository Configuration</div>
+          
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Repository Type *</span>
+              </label>
+              <select v-model="newPolicy.repository_type" class="select select-bordered">
+                <option value="s3">S3 (AWS/MinIO/Wasabi)</option>
+                <option value="rest-server">REST Server</option>
+                <option value="fs">Local Filesystem</option>
+                <option value="sftp">SFTP</option>
+              </select>
+            </div>
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Repository URL *</span>
+              </label>
+              <input 
+                v-model="newPolicy.repository_url" 
+                type="text" 
+                placeholder="s3:s3.amazonaws.com/bucket" 
+                class="input input-bordered" 
+                required
+              />
+            </div>
+          </div>
+
+          <!-- Paths -->
+          <div class="divider">Backup Paths</div>
+          
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Include Paths (one per line) *</span>
+            </label>
+            <textarea 
+              v-model="includePaths" 
+              class="textarea textarea-bordered font-mono text-sm" 
+              placeholder="/home&#10;/etc&#10;/var/www"
+              rows="3"
+            ></textarea>
+          </div>
+
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Exclude Patterns (one per line)</span>
+            </label>
+            <textarea 
+              v-model="excludePaths" 
+              class="textarea textarea-bordered font-mono text-sm" 
+              placeholder="*.log&#10;.cache&#10;node_modules"
+              rows="3"
+            ></textarea>
+          </div>
+
+          <!-- Retention -->
+          <div class="divider">Retention Rules</div>
+          
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Keep Last</span>
+              </label>
+              <input 
+                v-model.number="newPolicy.retention_rules.keep_last" 
+                type="number" 
+                min="0"
+                class="input input-bordered" 
+              />
+            </div>
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Keep Daily</span>
+              </label>
+              <input 
+                v-model.number="newPolicy.retention_rules.keep_daily" 
+                type="number" 
+                min="0"
+                class="input input-bordered" 
+              />
+            </div>
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Keep Weekly</span>
+              </label>
+              <input 
+                v-model.number="newPolicy.retention_rules.keep_weekly" 
+                type="number" 
+                min="0"
+                class="input input-bordered" 
+              />
+            </div>
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Keep Monthly</span>
+              </label>
+              <input 
+                v-model.number="newPolicy.retention_rules.keep_monthly" 
+                type="number" 
+                min="0"
+                class="input input-bordered" 
+              />
+            </div>
+          </div>
+
+          <!-- Options -->
+          <div class="form-control">
+            <label class="label cursor-pointer justify-start gap-2">
+              <input v-model="newPolicy.enabled" type="checkbox" class="checkbox" />
+              <span class="label-text">Enable policy immediately</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="modal-action">
+          <button @click="createPolicy" :disabled="creatingPolicy" class="btn btn-primary">
+            <span v-if="creatingPolicy" class="loading loading-spinner loading-sm"></span>
+            {{ creatingPolicy ? 'Creating...' : 'Create Policy' }}
+          </button>
+          <form method="dialog">
+            <button class="btn">Cancel</button>
+          </form>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- Edit Policy Modal -->
+    <dialog ref="editPolicyModal" class="modal">
+      <div class="modal-box max-w-3xl" v-if="editingPolicy">
+        <form method="dialog">
+          <button class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">✕</button>
+        </form>
+        <h3 class="font-bold text-2xl mb-4">Edit Policy</h3>
+        
+        <div class="space-y-4">
+          <!-- Same form fields as create, but bound to editingPolicy -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Policy Name *</span>
+              </label>
+              <input 
+                v-model="editingPolicy.name" 
+                type="text" 
+                placeholder="e.g., daily-backup" 
+                class="input input-bordered" 
+                required />
+            </div>
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Schedule (Cron) *</span>
+              </label>
+              <input 
+                v-model="editingPolicy.schedule" 
+                type="text" 
+                placeholder="0 2 * * *" 
+                class="input input-bordered" 
+                required />
+            </div>
+          </div>
+
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Description</span>
+            </label>
+            <textarea 
+              v-model="editingPolicy.description" 
+              class="textarea textarea-bordered" 
+              rows="2" 
+              placeholder="Describe this backup policy"></textarea>
+          </div>
+
+          <div class="divider">Repository</div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Repository Type *</span>
+              </label>
+              <select v-model="editingPolicy.repository_type" class="select select-bordered">
+                <option value="s3">S3 (AWS/MinIO/Wasabi)</option>
+                <option value="rest-server">REST Server</option>
+                <option value="fs">Local Filesystem</option>
+                <option value="sftp">SFTP</option>
+              </select>
+            </div>
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Repository URL *</span>
+              </label>
+              <input 
+                v-model="editingPolicy.repository_url" 
+                type="text" 
+                placeholder="/backup/path or s3:bucket/prefix" 
+                class="input input-bordered" 
+                required />
+            </div>
+          </div>
+
+          <div class="divider">Paths</div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Include Paths * (one per line)</span>
+              </label>
+              <textarea 
+                v-model="editIncludePaths" 
+                class="textarea textarea-bordered font-mono text-sm" 
+                rows="4" 
+                placeholder="/home/user&#10;/var/www"
+                required></textarea>
+            </div>
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Exclude Patterns (one per line)</span>
+              </label>
+              <textarea 
+                v-model="editExcludePaths" 
+                class="textarea textarea-bordered font-mono text-sm" 
+                rows="4" 
+                placeholder="*.tmp&#10;*.log&#10;node_modules"></textarea>
+            </div>
+          </div>
+
+          <div class="divider">Retention Rules</div>
+
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Keep Last</span>
+              </label>
+              <input v-model.number="editingPolicy.retention_rules.keep_last" type="number" min="0" class="input input-bordered" />
+            </div>
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Keep Daily</span>
+              </label>
+              <input v-model.number="editingPolicy.retention_rules.keep_daily" type="number" min="0" class="input input-bordered" />
+            </div>
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Keep Weekly</span>
+              </label>
+              <input v-model.number="editingPolicy.retention_rules.keep_weekly" type="number" min="0" class="input input-bordered" />
+            </div>
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">Keep Monthly</span>
+              </label>
+              <input v-model.number="editingPolicy.retention_rules.keep_monthly" type="number" min="0" class="input input-bordered" />
+            </div>
+          </div>
+
+          <div class="form-control">
+            <label class="label cursor-pointer justify-start gap-2">
+              <input v-model="editingPolicy.enabled" type="checkbox" class="checkbox" />
+              <span class="label-text">Policy enabled</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="modal-action">
+          <button @click="updatePolicy" :disabled="updatingPolicy" class="btn btn-primary">
+            <span v-if="updatingPolicy" class="loading loading-spinner loading-sm"></span>
+            {{ updatingPolicy ? 'Updating...' : 'Update Policy' }}
+          </button>
+          <form method="dialog">
+            <button class="btn">Cancel</button>
+          </form>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- Delete Confirmation Modal -->
+    <dialog ref="deleteConfirmModal" class="modal">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg">Delete Policy</h3>
+        <p class="py-4">Are you sure you want to delete the policy <strong>{{ policyToDelete?.name }}</strong>? This action cannot be undone.</p>
+        <div class="modal-action">
+          <button @click="deletePolicy" :disabled="deletingPolicy" class="btn btn-error">
+            <span v-if="deletingPolicy" class="loading loading-spinner loading-sm"></span>
+            {{ deletingPolicy ? 'Deleting...' : 'Delete' }}
+          </button>
+          <form method="dialog">
+            <button class="btn">Cancel</button>
+          </form>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- Assign Policy Modal -->
+    <dialog ref="assignModal" class="modal">
+      <div class="modal-box">
+        <form method="dialog">
+          <button class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">✕</button>
+        </form>
+        <h3 class="font-bold text-lg mb-4">Assign Policy to Agent</h3>
+        <p class="mb-4">Select an agent to assign <strong>{{ policyToAssign?.name }}</strong></p>
+        
+        <div class="space-y-2">
+          <div 
+            v-for="agent in agents" 
+            :key="agent.id"
+            class="flex items-center justify-between p-3 border rounded hover:bg-base-200 cursor-pointer"
+            @click="assignPolicyToAgent(agent.id)">
+            <div>
+              <div class="font-semibold">{{ agent.hostname }}</div>
+              <div class="text-sm text-base-content/60">{{ agent.os }} / {{ agent.arch }}</div>
+            </div>
+            <div class="badge" :class="agent.status === 'online' ? 'badge-success' : 'badge-ghost'">
+              {{ agent.status }}
+            </div>
+          </div>
+          <div v-if="!agents || agents.length === 0" class="text-center py-8 text-base-content/60">
+            No agents available
+          </div>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- Detach Policy Modal -->
+    <dialog ref="detachModal" class="modal">
+      <div class="modal-box">
+        <form method="dialog">
+          <button class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">✕</button>
+        </form>
+        <h3 class="font-bold text-lg mb-4">Detach Policy from Agents</h3>
+        <p class="mb-4">Select an agent to detach <strong>{{ policyToDetach?.name }}</strong></p>
+        
+        <div v-if="loadingAssignedAgents" class="flex justify-center py-8">
+          <span class="loading loading-spinner loading-lg"></span>
+        </div>
+        
+        <div v-else class="space-y-2">
+          <div 
+            v-for="agent in assignedAgents" 
+            :key="agent.id"
+            class="flex items-center justify-between p-3 border rounded hover:bg-base-200">
+            <div>
+              <div class="font-semibold">{{ agent.hostname }}</div>
+              <div class="text-sm text-base-content/60">{{ agent.status }}</div>
+            </div>
+            <button 
+              @click="detachPolicyFromAgent(agent.id)" 
+              :disabled="detachingAgent === agent.id"
+              class="btn btn-sm btn-error btn-outline">
+              <span v-if="detachingAgent === agent.id" class="loading loading-spinner loading-xs"></span>
+              {{ detachingAgent === agent.id ? 'Detaching...' : 'Detach' }}
+            </button>
+          </div>
+          <div v-if="!assignedAgents || assignedAgents.length === 0" class="text-center py-8 text-base-content/60">
+            No agents assigned to this policy
+          </div>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- Run Details Modal -->
+    <dialog ref="runDetailsModal" class="modal">
+      <div class="modal-box max-w-4xl" v-if="selectedRun">
+        <form method="dialog">
+          <button class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">✕</button>
+        </form>
+        <h3 class="font-bold text-2xl mb-4">Backup Run Details</h3>
+        
+        <div v-if="loadingRunDetails" class="flex justify-center py-12">
+          <span class="loading loading-spinner loading-lg"></span>
+        </div>
+        
+        <div v-else class="space-y-4">
+          <!-- Run Info -->
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="label"><span class="label-text font-bold">Status</span></label>
+              <div class="badge badge-lg" :class="getRunStatusClass(selectedRun.status)">
+                {{ selectedRun.status }}
+              </div>
+            </div>
+            <div>
+              <label class="label"><span class="label-text font-bold">Duration</span></label>
+              <p>{{ formatDuration(selectedRun.duration_seconds) }}</p>
+            </div>
+            <div>
+              <label class="label"><span class="label-text font-bold">Agent</span></label>
+              <p class="font-mono text-sm">{{ getAgentName(selectedRun.agent_id) }}</p>
+            </div>
+            <div>
+              <label class="label"><span class="label-text font-bold">Policy</span></label>
+              <p class="font-mono text-sm">{{ getPolicyName(selectedRun.policy_id) }}</p>
+            </div>
+            <div>
+              <label class="label"><span class="label-text font-bold">Start Time</span></label>
+              <p>{{ new Date(selectedRun.start_time).toLocaleString() }}</p>
+            </div>
+            <div v-if="selectedRun.end_time">
+              <label class="label"><span class="label-text font-bold">End Time</span></label>
+              <p>{{ new Date(selectedRun.end_time).toLocaleString() }}</p>
+            </div>
+          </div>
+          
+          <div v-if="selectedRun.snapshot_id">
+            <label class="label"><span class="label-text font-bold">Snapshot ID</span></label>
+            <code class="bg-base-200 px-3 py-2 rounded block font-mono text-sm">{{ selectedRun.snapshot_id }}</code>
+          </div>
+          
+          <div v-if="selectedRun.error_message">
+            <label class="label"><span class="label-text font-bold">Error Message</span></label>
+            <div class="alert alert-error">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>{{ selectedRun.error_message }}</span>
+            </div>
+          </div>
+          
+          <div v-if="selectedRun.log">
+            <label class="label"><span class="label-text font-bold">Logs</span></label>
+            <div class="mockup-code max-h-96 overflow-y-auto">
+              <pre class="px-4"><code>{{ selectedRun.log }}</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 
 const backups = ref([])
 const agents = ref([])
+const policies = ref([])
 const loading = ref(false)
 const error = ref(null)
 const unlocking = ref({})
@@ -488,6 +1174,48 @@ const snapshotModal = ref(null)
 const files = ref([])
 const fileFilter = ref('')
 const fileModal = ref(null)
+const createPolicyModal = ref(null)
+const creatingPolicy = ref(false)
+const includePaths = ref('')
+const excludePaths = ref('')
+const editPolicyModal = ref(null)
+const updatingPolicy = ref(false)
+const editingPolicy = ref(null)
+const editIncludePaths = ref('')
+const editExcludePaths = ref('')
+const deleteConfirmModal = ref(null)
+const deletingPolicy = ref(false)
+const policyToDelete = ref(null)
+const assignModal = ref(null)
+const policyToAssign = ref(null)
+const detachModal = ref(null)
+const policyToDetach = ref(null)
+const assignedAgents = ref([])
+const loadingAssignedAgents = ref(false)
+const detachingAgent = ref(null)
+const backupRuns = ref([])
+const loadingRuns = ref(false)
+const runsFilter = ref({ status: '', agentId: '' })
+const runDetailsModal = ref(null)
+const selectedRun = ref(null)
+const loadingRunDetails = ref(false)
+const newPolicy = ref({
+  name: '',
+  description: '',
+  schedule: '0 2 * * *',
+  repository_type: 's3',
+  repository_url: '',
+  repository_config: {},
+  include_paths: { paths: [] },
+  exclude_paths: { patterns: [] },
+  retention_rules: {
+    keep_last: 7,
+    keep_daily: 30,
+    keep_weekly: 4,
+    keep_monthly: 12
+  },
+  enabled: true
+})
 
 const API_BASE = '/api/v1'
 
@@ -903,11 +1631,506 @@ const formatUptime = (seconds) => {
   return `${minutes}m`
 }
 
+const fetchPolicies = async () => {
+  try {
+    const response = await fetch('/policies', {
+      headers: getAuthHeaders()
+    })
+    
+    if (response.status === 401) {
+      clearAuth()
+      if (promptForAuth()) {
+        return await fetchPolicies()
+      }
+      return
+    }
+    
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const data = await response.json()
+    policies.value = Array.isArray(data) ? data : []
+    console.log('Fetched policies:', policies.value)
+  } catch (err) {
+    console.error('Failed to fetch policies:', err)
+  }
+}
+
+const getPolicyStatusClass = (policy) => {
+  return policy.enabled ? 'badge-success' : 'badge-ghost'
+}
+
+const formatCron = (schedule) => {
+  // Simple cron formatter - could be enhanced
+  if (schedule === '0 2 * * *') return 'Daily at 2 AM'
+  if (schedule === '0 */6 * * *') return 'Every 6 hours'
+  if (schedule.startsWith('every ')) return schedule
+  return schedule
+}
+
+const openCreatePolicyModal = () => {
+  // Reset form
+  newPolicy.value = {
+    name: '',
+    description: '',
+    schedule: '0 2 * * *',
+    repository_type: 's3',
+    repository_url: '',
+    repository_config: {},
+    include_paths: { paths: [] },
+    exclude_paths: { patterns: [] },
+    retention_rules: {
+      keep_last: 7,
+      keep_daily: 30,
+      keep_weekly: 4,
+      keep_monthly: 12
+    },
+    enabled: true
+  }
+  includePaths.value = ''
+  excludePaths.value = ''
+  createPolicyModal.value?.showModal()
+}
+
+const createPolicy = async () => {
+  creatingPolicy.value = true
+  
+  try {
+    // Parse paths from textarea
+    const includePathsArray = includePaths.value
+      .split('\n')
+      .map(p => p.trim())
+      .filter(p => p.length > 0)
+    
+    const excludePathsArray = excludePaths.value
+      .split('\n')
+      .map(p => p.trim())
+      .filter(p => p.length > 0)
+    
+    if (includePathsArray.length === 0) {
+      error.value = 'At least one include path is required'
+      creatingPolicy.value = false
+      return
+    }
+    
+    // Prepare policy data with camelCase field names as expected by API
+    const repository = {
+      type: newPolicy.value.repository_type,
+      ...newPolicy.value.repository_config
+    }
+    
+    // Add type-specific fields
+    if (newPolicy.value.repository_type === 'fs') {
+      repository.path = newPolicy.value.repository_url
+    } else {
+      repository.url = newPolicy.value.repository_url
+    }
+    
+    const policyData = {
+      name: newPolicy.value.name,
+      description: newPolicy.value.description || null,
+      schedule: newPolicy.value.schedule,
+      includePaths: includePathsArray,
+      excludePaths: excludePathsArray.length > 0 ? excludePathsArray : undefined,
+      repository,
+      retentionRules: newPolicy.value.retention_rules,
+      enabled: newPolicy.value.enabled
+    }
+    
+    console.log('Creating policy:', JSON.stringify(policyData, null, 2))
+    
+    const response = await fetch('/policies', {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(policyData)
+    })
+    
+    if (response.status === 401) {
+      clearAuth()
+      creatingPolicy.value = false
+      if (promptForAuth()) {
+        return await createPolicy()
+      }
+      error.value = 'Authentication cancelled'
+      return
+    }
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.error || `HTTP ${response.status}`)
+    }
+    
+    // Success - close modal and refresh
+    createPolicyModal.value?.close()
+    await fetchPolicies()
+    error.value = null
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    creatingPolicy.value = false
+  }
+}
+
+const openEditPolicyModal = (policy) => {
+  // Deep copy the policy to avoid modifying the original
+  editingPolicy.value = {
+    id: policy.id,
+    name: policy.name,
+    description: policy.description || '',
+    schedule: policy.schedule,
+    repository_type: policy.repository?.type || 's3',
+    repository_url: policy.repository?.url || policy.repository?.path || '',
+    repository_config: {},
+    retention_rules: {
+      keep_last: policy.retentionRules?.keep_last || 7,
+      keep_daily: policy.retentionRules?.keep_daily || 30,
+      keep_weekly: policy.retentionRules?.keep_weekly || 4,
+      keep_monthly: policy.retentionRules?.keep_monthly || 12
+    },
+    enabled: policy.enabled
+  }
+  
+  // Populate path textareas
+  editIncludePaths.value = (policy.includePaths || []).join('\n')
+  editExcludePaths.value = (policy.excludePaths || []).join('\n')
+  
+  editPolicyModal.value?.showModal()
+}
+
+const updatePolicy = async () => {
+  updatingPolicy.value = true
+  
+  try {
+    // Parse paths from textarea
+    const includePathsArray = editIncludePaths.value
+      .split('\n')
+      .map(p => p.trim())
+      .filter(p => p.length > 0)
+    
+    const excludePathsArray = editExcludePaths.value
+      .split('\n')
+      .map(p => p.trim())
+      .filter(p => p.length > 0)
+    
+    if (includePathsArray.length === 0) {
+      error.value = 'At least one include path is required'
+      updatingPolicy.value = false
+      return
+    }
+    
+    // Prepare repository object
+    const repository = {
+      type: editingPolicy.value.repository_type,
+      ...editingPolicy.value.repository_config
+    }
+    
+    if (editingPolicy.value.repository_type === 'fs') {
+      repository.path = editingPolicy.value.repository_url
+    } else {
+      repository.url = editingPolicy.value.repository_url
+    }
+    
+    const policyData = {
+      name: editingPolicy.value.name,
+      description: editingPolicy.value.description || null,
+      schedule: editingPolicy.value.schedule,
+      includePaths: includePathsArray,
+      excludePaths: excludePathsArray.length > 0 ? excludePathsArray : undefined,
+      repository,
+      retentionRules: editingPolicy.value.retention_rules,
+      enabled: editingPolicy.value.enabled
+    }
+    
+    const response = await fetch(`/policies/${editingPolicy.value.id}`, {
+      method: 'PUT',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(policyData)
+    })
+    
+    if (response.status === 401) {
+      clearAuth()
+      updatingPolicy.value = false
+      if (promptForAuth()) {
+        return await updatePolicy()
+      }
+      error.value = 'Authentication cancelled'
+      return
+    }
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.error || `HTTP ${response.status}`)
+    }
+    
+    // Success - close modal and refresh
+    editPolicyModal.value?.close()
+    await fetchPolicies()
+    error.value = null
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    updatingPolicy.value = false
+  }
+}
+
+const confirmDeletePolicy = (policy) => {
+  policyToDelete.value = policy
+  deleteConfirmModal.value?.showModal()
+}
+
+const deletePolicy = async () => {
+  if (!policyToDelete.value) return
+  
+  deletingPolicy.value = true
+  
+  try {
+    const response = await fetch(`/policies/${policyToDelete.value.id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    })
+    
+    if (response.status === 401) {
+      clearAuth()
+      deletingPolicy.value = false
+      if (promptForAuth()) {
+        return await deletePolicy()
+      }
+      error.value = 'Authentication cancelled'
+      return
+    }
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.error || `HTTP ${response.status}`)
+    }
+    
+    // Success - close modal and refresh
+    deleteConfirmModal.value?.close()
+    await fetchPolicies()
+    policyToDelete.value = null
+    error.value = null
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    deletingPolicy.value = false
+  }
+}
+
+const openAssignModal = (policy) => {
+  policyToAssign.value = policy
+  assignModal.value?.showModal()
+}
+
+const assignPolicyToAgent = async (agentId) => {
+  if (!policyToAssign.value) return
+  
+  try {
+    const response = await fetch(`/agents/${agentId}/policies/${policyToAssign.value.id}`, {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json'
+      }
+    })
+    
+    if (response.status === 401) {
+      clearAuth()
+      if (promptForAuth()) {
+        return await assignPolicyToAgent(agentId)
+      }
+      error.value = 'Authentication cancelled'
+      return
+    }
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.error || `HTTP ${response.status}`)
+    }
+    
+    // Success - close modal and show success message
+    assignModal.value?.close()
+    policyToAssign.value = null
+    error.value = null
+    alert('Policy assigned successfully!')
+  } catch (err) {
+    error.value = err.message
+    alert(`Failed to assign policy: ${err.message}`)
+  }
+}
+
+const openDetachModal = async (policy) => {
+  policyToDetach.value = policy
+  loadingAssignedAgents.value = true
+  detachModal.value?.showModal()
+  
+  try {
+    const response = await fetch(`/policies/${policy.id}/agents`, {
+      headers: getAuthHeaders()
+    })
+    
+    if (response.status === 401) {
+      clearAuth()
+      if (promptForAuth()) {
+        return await openDetachModal(policy)
+      }
+      return
+    }
+    
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const data = await response.json()
+    assignedAgents.value = data.agents || []
+  } catch (err) {
+    console.error('Failed to fetch assigned agents:', err)
+    assignedAgents.value = []
+  } finally {
+    loadingAssignedAgents.value = false
+  }
+}
+
+const detachPolicyFromAgent = async (agentId) => {
+  if (!policyToDetach.value) return
+  
+  detachingAgent.value = agentId
+  
+  try {
+    const response = await fetch(`/agents/${agentId}/policies/${policyToDetach.value.id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    })
+    
+    if (response.status === 401) {
+      clearAuth()
+      detachingAgent.value = null
+      if (promptForAuth()) {
+        return await detachPolicyFromAgent(agentId)
+      }
+      error.value = 'Authentication cancelled'
+      return
+    }
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.error || `HTTP ${response.status}`)
+    }
+    
+    // Success - remove from list
+    assignedAgents.value = assignedAgents.value.filter(a => a.id !== agentId)
+    error.value = null
+    alert('Policy detached successfully!')
+  } catch (err) {
+    error.value = err.message
+    alert(`Failed to detach policy: ${err.message}`)
+  } finally {
+    detachingAgent.value = null
+  }
+}
+
+const fetchBackupRuns = async () => {
+  if (!runsFilter.value.agentId && agents.value.length === 0) return
+  
+  loadingRuns.value = true
+  try {
+    // Fetch runs for all agents or filtered agent
+    const agentIds = runsFilter.value.agentId ? [runsFilter.value.agentId] : agents.value.map(a => a.id)
+    
+    const allRuns = []
+    for (const agentId of agentIds) {
+      const url = new URL(`/agents/${agentId}/backup-runs`, window.location.origin)
+      if (runsFilter.value.status) {
+        url.searchParams.set('status', runsFilter.value.status)
+      }
+      url.searchParams.set('limit', '50')
+      
+      const response = await fetch(url.pathname + url.search, {
+        headers: getAuthHeaders()
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        allRuns.push(...(data.runs || []))
+      }
+    }
+    
+    // Sort by start time descending
+    allRuns.sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
+    backupRuns.value = allRuns.slice(0, 50)
+  } catch (err) {
+    console.error('Failed to fetch backup runs:', err)
+    backupRuns.value = []
+  } finally {
+    loadingRuns.value = false
+  }
+}
+
+const getRunStatusClass = (status) => {
+  if (status === 'success') return 'badge-success'
+  if (status === 'failed') return 'badge-error'
+  if (status === 'running') return 'badge-warning'
+  return 'badge-ghost'
+}
+
+const getAgentName = (agentId) => {
+  const agent = agents.value.find(a => a.id === agentId)
+  return agent ? agent.hostname : agentId.substring(0, 8)
+}
+
+const getPolicyName = (policyId) => {
+  const policy = policies.value.find(p => p.id === policyId)
+  return policy ? policy.name : policyId.substring(0, 8)
+}
+
+const formatDuration = (seconds) => {
+  if (!seconds) return '-'
+  const mins = Math.floor(seconds / 60)
+  const secs = Math.floor(seconds % 60)
+  if (mins > 0) return `${mins}m ${secs}s`
+  return `${secs}s`
+}
+
+const viewRunDetails = async (run) => {
+  selectedRun.value = run
+  loadingRunDetails.value = true
+  runDetailsModal.value?.showModal()
+  
+  try {
+    const response = await fetch(`/agents/${run.agent_id}/backup-runs/${run.id}`, {
+      headers: getAuthHeaders()
+    })
+    
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const data = await response.json()
+    selectedRun.value = data
+  } catch (err) {
+    console.error('Failed to fetch run details:', err)
+  } finally {
+    loadingRunDetails.value = false
+  }
+}
+
+// Watch for filter changes
+watch([() => runsFilter.value.status, () => runsFilter.value.agentId], () => {
+  fetchBackupRuns()
+})
+
+// Watch for agents being loaded
+watch(agents, (newAgents) => {
+  if (newAgents.length > 0 && backupRuns.value.length === 0) {
+    fetchBackupRuns()
+  }
+})
+
 onMounted(() => {
   fetchBackups()
   fetchAgents()
+  fetchPolicies()
   setInterval(fetchBackups, 30000)
   setInterval(fetchAgents, 30000)
+  setInterval(fetchPolicies, 30000)
+  setInterval(fetchBackupRuns, 30000)
 })
 </script>
 

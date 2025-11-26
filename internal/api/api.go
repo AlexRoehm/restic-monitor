@@ -75,12 +75,36 @@ func (a *API) Handler() http.Handler {
 
 	// Agent API routes
 	mux.HandleFunc("/agents/register", a.handleAgentRegister)
-	mux.HandleFunc("/agents/", a.handleAgentsRouter) // Routes to GET or heartbeat handler
 	mux.HandleFunc("/agents", a.handleGetAgents)     // GET /agents (list)
 
 	// Policy API routes
 	mux.HandleFunc("/policies/", a.handlePolicies) // Handles GET/PUT/DELETE for /policies/{id}
 	mux.HandleFunc("/policies", a.handlePolicies)  // Handles POST/GET for /policies
+
+	// Policy assignment routes
+	assignmentHandler := NewPolicyAssignmentHandler(a.store.GetDB())
+	mux.Handle("/agents/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is a policy assignment route
+		if strings.Contains(r.URL.Path, "/policies/") {
+			// Add tenant ID header from store
+			r.Header.Set("X-Tenant-ID", a.store.GetTenantID().String())
+			assignmentHandler.ServeHTTP(w, r)
+			return
+		}
+		// Check if this is a backup-runs route
+		if strings.Contains(r.URL.Path, "/backup-runs") {
+			if strings.Count(r.URL.Path, "/") == 4 {
+				// /agents/{id}/backup-runs/{runId}
+				a.handleGetBackupRun(w, r)
+			} else {
+				// /agents/{id}/backup-runs
+				a.handleGetBackupRuns(w, r)
+			}
+			return
+		}
+		// Otherwise, route to existing agent handlers
+		a.handleAgentsRouter(w, r)
+	}))
 
 	// Scheduler API routes
 	if a.scheduler != nil {
