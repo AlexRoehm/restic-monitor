@@ -92,8 +92,12 @@ type TargetData struct {
 	KeepMonthly int `json:"keep_monthly"`
 }
 
+// DefaultTenantID is the tenant ID used in single-tenant mode
+// This ensures consistent tenant ID across restarts
+var DefaultTenantID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+
 func New(dsn string) (*Store, error) {
-	return NewWithTenant(dsn, uuid.New())
+	return NewWithTenant(dsn, DefaultTenantID)
 }
 
 // NewWithTenant creates a store with a specific tenant ID

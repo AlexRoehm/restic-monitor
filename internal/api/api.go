@@ -20,9 +20,14 @@ import (
 
 // Run starts the HTTP API and shuts it down when the context is canceled.
 func Run(ctx context.Context, addr string, cfg config.Config, st *store.Store, mon Monitor, staticDir string) error {
+	api := New(cfg, st, mon, staticDir)
+	
+	// Start agent monitoring to mark stale agents offline
+	api.StartAgentMonitor(ctx)
+	
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: New(cfg, st, mon, staticDir).Handler(),
+		Handler: api.Handler(),
 	}
 
 	go func() {
