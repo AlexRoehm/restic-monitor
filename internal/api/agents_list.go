@@ -22,6 +22,24 @@ func (a *API) handleAgentsRouter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// /agents/{id}/settings -> settings update handler (EPIC 15)
+	if len(parts) == 3 && parts[0] == "agents" && parts[2] == "settings" && r.Method == http.MethodPatch {
+		a.handleUpdateAgentSettings(w, r)
+		return
+	}
+
+	// /agents/{id}/load -> load status handler (EPIC 15 Phase 3)
+	if len(parts) == 3 && parts[0] == "agents" && parts[2] == "load" && r.Method == http.MethodGet {
+		a.handleGetAgentLoad(w, r)
+		return
+	}
+
+	// /agents/{id}/backoff-status -> backoff state handler (EPIC 15 Phase 6)
+	if len(parts) == 3 && parts[0] == "agents" && parts[2] == "backoff-status" && r.Method == http.MethodGet {
+		a.handleGetAgentBackoff(w, r)
+		return
+	}
+
 	// /agents/{id}/policies -> policies handler
 	if len(parts) == 3 && parts[0] == "agents" && parts[2] == "policies" && r.Method == http.MethodGet {
 		a.handleGetAgentPolicies(w, r)

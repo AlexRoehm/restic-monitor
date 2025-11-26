@@ -378,3 +378,266 @@ func TestMigration003PolicyFields(t *testing.T) {
 		assert.Error(t, err, "Should fail due to unique constraint")
 	})
 }
+
+func TestMigration007TaskRetryTracking(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	tenantID := uuid.New()
+
+	t.Run("Add retry fields to tasks table", func(t *testing.T) {
+		runner := store.NewMigrationRunner(db)
+		err := runner.Initialize(ctx)
+		require.NoError(t, err)
+
+		// Run migrations up to 007
+		migrations := store.GetAllMigrations(tenantID)
+		for _, mig := range migrations {
+			err := runner.Run(ctx, mig)
+			require.NoError(t, err)
+		}
+
+		// Create a task to verify fields exist
+		task := store.Task{
+			TenantID:          tenantID,
+			AgentID:           uuid.New(),
+			PolicyID:          uuid.New(),
+			TaskType:          "backup",
+			Status:            "pending",
+			Repository:        "s3:bucket/repo",
+			RetryCount:        intPtrMigration(0),
+			MaxRetries:        intPtrMigration(3),
+			NextRetryAt:       nil,
+			LastErrorCategory: nil,
+		}
+		err = db.Create(&task).Error
+		require.NoError(t, err)
+
+		// Verify task was created with retry fields
+		var loaded store.Task
+		err = db.First(&loaded, task.ID).Error
+		require.NoError(t, err)
+		assert.NotNil(t, loaded.RetryCount)
+		assert.Equal(t, 0, *loaded.RetryCount)
+		assert.NotNil(t, loaded.MaxRetries)
+		assert.Equal(t, 3, *loaded.MaxRetries)
+		assert.Nil(t, loaded.NextRetryAt)
+		assert.Nil(t, loaded.LastErrorCategory)
+	})
+
+	t.Run("Update retry info on task", func(t *testing.T) {
+		// Use same DB from previous test
+		nextRetry := time.Now().Add(5 * time.Minute)
+		errorCategory := "network"
+
+		// Create task
+		task := store.Task{
+			TenantID:   tenantID,
+			AgentID:    uuid.New(),
+			PolicyID:   uuid.New(),
+			TaskType:   "backup",
+			Status:     "failed",
+			Repository: "s3:bucket/repo",
+		}
+		err = db.Create(&task).Error
+		require.NoError(t, err)
+
+		// Update retry info
+		task.RetryCount = intPtrMigration(1)
+		task.MaxRetries = intPtrMigration(5)
+		task.NextRetryAt = &nextRetry
+		task.LastErrorCategory = &errorCategory
+		err = db.Save(&task).Error
+		require.NoError(t, err)
+
+		// Verify updates
+		var loaded store.Task
+		err = db.First(&loaded, task.ID).Error
+		require.NoError(t, err)
+		assert.Equal(t, 1, *loaded.RetryCount)
+		assert.Equal(t, 5, *loaded.MaxRetries)
+		assert.NotNil(t, loaded.NextRetryAt)
+		assert.Equal(t, "network", *loaded.LastErrorCategory)
+	})
+}
+
+func TestMigration008PolicyMaxRetries(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	tenantID := uuid.New()
+
+	t.Run("Add max_retries to policies table", func(t *testing.T) {
+		runner := store.NewMigrationRunner(db)
+		err := runner.Initialize(ctx)
+		require.NoError(t, err)
+
+		// Run migrations up to 008
+		migrations := store.GetAllMigrations(tenantID)
+		for _, mig := range migrations {
+			err := runner.Run(ctx, mig)
+			require.NoError(t, err)
+		}
+
+		// Create a policy to verify field exists
+		policy := store.Policy{
+			TenantID:       tenantID,
+			Name:           "test-policy",
+			Schedule:       "0 2 * * *",
+			IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+			RepositoryURL:  "s3://bucket/repo",
+			RepositoryType: "s3",
+			RetentionRules: store.JSONB{"keep_daily": 7},
+			Enabled:        true,
+		}
+		err = db.Create(&policy).Error
+		require.NoError(t, err)
+
+		// Verify policy was created with default max_retries
+		var loaded store.Policy
+		err = db.First(&loaded, policy.ID).Error
+		require.NoError(t, err)
+		assert.NotNil(t, loaded.MaxRetries)
+		assert.Equal(t, 3, *loaded.MaxRetries, "Default max_retries should be 3")
+	})
+
+	t.Run("Override max_retries on policy", func(t *testing.T) {
+		// Create policy with custom max_retries
+		maxRetries := 5
+		policy := store.Policy{
+			TenantID:       tenantID,
+			Name:           "custom-retry-policy",
+			Schedule:       "0 3 * * *",
+			IncludePaths:   store.JSONB{"paths": []string{"/backup"}},
+			RepositoryURL:  "s3://bucket/repo2",
+			RepositoryType: "s3",
+			RetentionRules: store.JSONB{"keep_daily": 14},
+			MaxRetries:     &maxRetries,
+			Enabled:        true,
+		}
+		err = db.Create(&policy).Error
+		require.NoError(t, err)
+
+		// Verify custom value was saved
+		var loaded store.Policy
+		err = db.First(&loaded, policy.ID).Error
+		require.NoError(t, err)
+		assert.NotNil(t, loaded.MaxRetries)
+		assert.Equal(t, 5, *loaded.MaxRetries)
+	})
+}
+
+// TestMigration009AddAgentBackoffState tests migration 009
+func TestMigration009AddAgentBackoffState(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	tenantID := uuid.New()
+
+	// Run migrations
+	runner := store.NewMigrationRunner(db)
+	err = runner.Initialize(ctx)
+	require.NoError(t, err)
+
+	migrations := store.GetAllMigrations(tenantID)
+	err = runner.RunAll(ctx, migrations)
+	require.NoError(t, err)
+
+	t.Run("Create agent with default backoff state", func(t *testing.T) {
+		agent := store.Agent{
+			TenantID: tenantID,
+			Hostname: "test-agent",
+			OS:       "linux",
+			Arch:     "amd64",
+			Version:  "1.0.0",
+			Status:   "online",
+		}
+		err = db.Create(&agent).Error
+		require.NoError(t, err)
+
+		// Verify backoff fields exist with default values
+		var loaded store.Agent
+		err = db.First(&loaded, agent.ID).Error
+		require.NoError(t, err)
+		
+		// TasksInBackoff defaults to 0 (not NULL due to GORM default:0)
+		if loaded.TasksInBackoff != nil {
+			assert.Equal(t, 0, *loaded.TasksInBackoff, "tasks_in_backoff should default to 0")
+		}
+		assert.Nil(t, loaded.EarliestRetryAt, "earliest_retry_at should default to NULL")
+	})
+
+	t.Run("Update agent backoff state", func(t *testing.T) {
+		// Create agent
+		agent := store.Agent{
+			TenantID: tenantID,
+			Hostname: "test-agent-2",
+			OS:       "linux",
+			Arch:     "amd64",
+			Version:  "1.0.0",
+			Status:   "online",
+		}
+		err = db.Create(&agent).Error
+		require.NoError(t, err)
+
+		// Update with backoff state
+		tasksInBackoff := 5
+		earliestRetry := time.Now().Add(10 * time.Minute)
+		agent.TasksInBackoff = &tasksInBackoff
+		agent.EarliestRetryAt = &earliestRetry
+
+		err = db.Save(&agent).Error
+		require.NoError(t, err)
+
+		// Verify values persisted
+		var loaded store.Agent
+		err = db.First(&loaded, agent.ID).Error
+		require.NoError(t, err)
+		assert.NotNil(t, loaded.TasksInBackoff)
+		assert.Equal(t, 5, *loaded.TasksInBackoff)
+		assert.NotNil(t, loaded.EarliestRetryAt)
+		assert.WithinDuration(t, earliestRetry, *loaded.EarliestRetryAt, time.Second)
+	})
+
+	t.Run("Reset backoff state to zero", func(t *testing.T) {
+		// Create agent with backoff state
+		tasksInBackoff := 3
+		earliestRetry := time.Now().Add(5 * time.Minute)
+		agent := store.Agent{
+			TenantID:        tenantID,
+			Hostname:        "test-agent-3",
+			OS:              "linux",
+			Arch:            "amd64",
+			Version:         "1.0.0",
+			Status:          "online",
+			TasksInBackoff:  &tasksInBackoff,
+			EarliestRetryAt: &earliestRetry,
+		}
+		err = db.Create(&agent).Error
+		require.NoError(t, err)
+
+		// Reset to zero
+		zeroCount := 0
+		agent.TasksInBackoff = &zeroCount
+		agent.EarliestRetryAt = nil
+		err = db.Save(&agent).Error
+		require.NoError(t, err)
+
+		// Verify reset
+		var loaded store.Agent
+		err = db.First(&loaded, agent.ID).Error
+		require.NoError(t, err)
+		assert.NotNil(t, loaded.TasksInBackoff)
+		assert.Equal(t, 0, *loaded.TasksInBackoff)
+		assert.Nil(t, loaded.EarliestRetryAt)
+	})
+}

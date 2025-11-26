@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -255,5 +256,107 @@ func TestTaskQuery(t *testing.T) {
 
 	if len(otherAgentTasks) != 1 {
 		t.Errorf("Expected 1 task for other agent, got %d", len(otherAgentTasks))
+	}
+}
+
+// TestGetPendingTasksWithBackoff tests that tasks in backoff period are excluded (EPIC 15 Phase 4)
+func TestGetPendingTasksWithBackoff(t *testing.T) {
+	tenantID := uuid.New()
+	st, err := store.NewWithTenant(":memory:", tenantID)
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+
+	ctx := context.Background()
+	agentID := uuid.New()
+
+	// Create 3 pending tasks:
+	// 1. No retry state (should be returned)
+	// 2. In backoff period (should NOT be returned)
+	// 3. Backoff expired (should be returned)
+
+	task1 := &store.Task{
+		TenantID:   tenantID,
+		AgentID:    agentID,
+		PolicyID:   uuid.New(),
+		TaskType:   "backup",
+		Status:     "pending",
+		Repository: "s3:bucket/repo1",
+	}
+	err = st.CreateTask(ctx, task1)
+	if err != nil {
+		t.Fatalf("Failed to create task1: %v", err)
+	}
+
+	futureRetry := time.Now().Add(10 * time.Minute)
+	retryCount := 1
+	maxRetries := 3
+	task2 := &store.Task{
+		TenantID:    tenantID,
+		AgentID:     agentID,
+		PolicyID:    uuid.New(),
+		TaskType:    "backup",
+		Status:      "pending",
+		Repository:  "s3:bucket/repo2",
+		RetryCount:  &retryCount,
+		MaxRetries:  &maxRetries,
+		NextRetryAt: &futureRetry,
+	}
+	err = st.CreateTask(ctx, task2)
+	if err != nil {
+		t.Fatalf("Failed to create task2: %v", err)
+	}
+
+	pastRetry := time.Now().Add(-5 * time.Minute)
+	task3 := &store.Task{
+		TenantID:    tenantID,
+		AgentID:     agentID,
+		PolicyID:    uuid.New(),
+		TaskType:    "backup",
+		Status:      "pending",
+		Repository:  "s3:bucket/repo3",
+		RetryCount:  &retryCount,
+		MaxRetries:  &maxRetries,
+		NextRetryAt: &pastRetry,
+	}
+	err = st.CreateTask(ctx, task3)
+	if err != nil {
+		t.Fatalf("Failed to create task3: %v", err)
+	}
+
+	// Get pending tasks - should only return task1 and task3
+	tasks, err := st.GetPendingTasks(ctx, agentID)
+	if err != nil {
+		t.Fatalf("Failed to get pending tasks: %v", err)
+	}
+
+	if len(tasks) != 2 {
+		t.Errorf("Expected 2 available tasks, got %d", len(tasks))
+	}
+
+	// Verify task2 (in backoff) is NOT in the list
+	for _, task := range tasks {
+		if task.ID == task2.ID {
+			t.Error("Task in backoff period should not be returned")
+		}
+	}
+
+	// Verify task1 and task3 are in the list
+	foundTask1 := false
+	foundTask3 := false
+	for _, task := range tasks {
+		if task.ID == task1.ID {
+			foundTask1 = true
+		}
+		if task.ID == task3.ID {
+			foundTask3 = true
+		}
+	}
+
+	if !foundTask1 {
+		t.Error("Task without backoff should be returned")
+	}
+	if !foundTask3 {
+		t.Error("Task with expired backoff should be returned")
 	}
 }

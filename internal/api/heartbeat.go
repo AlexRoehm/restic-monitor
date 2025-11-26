@@ -19,6 +19,19 @@ type DiskInfo struct {
 	TotalBytes int64  `json:"totalBytes"`
 }
 
+// TaskTypeCount represents the count of running tasks by type
+type TaskTypeCount struct {
+	TaskType string `json:"taskType"`
+	Count    int    `json:"count"`
+}
+
+// TaskTypeCapacity represents available capacity by task type
+type TaskTypeCapacity struct {
+	TaskType  string `json:"taskType"`
+	Available int    `json:"available"`
+	Maximum   int    `json:"maximum"`
+}
+
 // AgentHeartbeatRequest represents the heartbeat payload from an agent
 type AgentHeartbeatRequest struct {
 	Version          string     `json:"version"`
@@ -26,6 +39,11 @@ type AgentHeartbeatRequest struct {
 	UptimeSeconds    *int64     `json:"uptimeSeconds,omitempty"`
 	Disks            []DiskInfo `json:"disks,omitempty"`
 	LastBackupStatus string     `json:"lastBackupStatus,omitempty"` // success, failure, none, running
+	// Load information (EPIC 15 Phase 3)
+	CurrentTasksCount    *int                `json:"currentTasksCount,omitempty"`
+	RunningTaskTypes     []TaskTypeCount     `json:"runningTaskTypes,omitempty"`
+	AvailableSlots       *int                `json:"availableSlots,omitempty"`
+	AvailableSlotsByType []TaskTypeCapacity  `json:"availableSlotsByType,omitempty"`
 }
 
 // AgentHeartbeatResponse represents the response to a heartbeat
@@ -156,6 +174,12 @@ func (a *API) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Heartbeat from %s (%s): version=%s, os=%s, uptime=%v, disks=%d, backup_status=%s",
 		agent.ID, agent.Hostname, agent.Version, agent.OS, req.UptimeSeconds, diskCount, req.LastBackupStatus)
+
+	// Update agent backoff state (EPIC 15 Phase 6)
+	if err := a.UpdateAgentBackoffState(agentID); err != nil {
+		log.Printf("Failed to update backoff state for agent %s: %v", agentID, err)
+		// Don't fail the heartbeat - backoff state is informational
+	}
 
 	// Return success response
 	response := AgentHeartbeatResponse{

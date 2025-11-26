@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -8,8 +9,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/example/restic-monitor/agent"
 	"github.com/example/restic-monitor/internal/store"
 	"github.com/google/uuid"
+)
+
+// Default retry configuration for tasks
+const (
+	DefaultMaxRetries     = 3
+	DefaultBaseDelay      = 5 * time.Second
+	DefaultMaxDelay       = 5 * time.Minute
+	DefaultJitterFactor   = 0.5
 )
 
 // TaskResultRequest represents the task result payload from an agent
@@ -137,6 +147,12 @@ func (a *API) handleTaskResults(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Update task retry state based on result
+	if err := a.updateTaskRetryState(ctx, taskID, req.Status, req.ErrorMessage); err != nil {
+		log.Printf("Failed to update task retry state for %s: %v", taskID, err)
+		// Don't fail the request - retry state update is not critical for the immediate response
+	}
+
 	// Log the result
 	log.Printf("Task result from agent %s: task=%s, policy=%s, type=%s, status=%s, duration=%.1fs",
 		agentID, taskID, policyID, req.TaskType, req.Status, req.DurationSeconds)
@@ -175,4 +191,127 @@ func validateTaskResultRequest(req TaskResultRequest) []string {
 	}
 
 	return errors
+}
+
+// updateTaskRetryState updates task retry tracking based on execution result
+func (a *API) updateTaskRetryState(ctx context.Context, taskID uuid.UUID, status string, errorMessage string) error {
+	// Fetch the task
+	var task store.Task
+	if err := a.store.GetDB().Where("id = ?", taskID).First(&task).Error; err != nil {
+		return fmt.Errorf("task not found: %w", err)
+	}
+
+	// Initialize retry fields if not set
+	if task.RetryCount == nil {
+		zero := 0
+		task.RetryCount = &zero
+	}
+	if task.MaxRetries == nil {
+		maxRetries := DefaultMaxRetries
+		task.MaxRetries = &maxRetries
+	}
+
+	// Handle based on status
+	if status == "success" || status == "completed" {
+		// Success - reset retry state
+		zero := 0
+		task.RetryCount = &zero
+		task.NextRetryAt = nil
+		task.LastErrorCategory = nil
+		task.Status = "completed"
+		task.CompletedAt = timePtr(time.Now())
+	} else if status == "failure" || status == "failed" {
+		// Check if error is permanent
+		retryInfo := agent.RetryInfo{
+			RetryCount:  *task.RetryCount,
+			MaxRetries:  *task.MaxRetries,
+			LastError:   errorMessage,
+			NextRetryAt: task.NextRetryAt,
+		}
+
+		shouldRetry, reason := agent.ShouldRetryTask(retryInfo)
+		
+		if shouldRetry {
+			// Increment retry count
+			newRetryCount := *task.RetryCount + 1
+			task.RetryCount = &newRetryCount
+
+			// Calculate next retry time
+			nextRetry := agent.CalculateNextRetryTime(
+				newRetryCount,
+				DefaultBaseDelay,
+				DefaultMaxDelay,
+				DefaultJitterFactor,
+				time.Now(),
+			)
+			task.NextRetryAt = &nextRetry
+
+			// Categorize error
+			errorCategory := categorizeError(errorMessage)
+			task.LastErrorCategory = &errorCategory
+
+			// Keep task in pending state for retry
+			task.Status = "pending"
+
+			log.Printf("Task %s will retry (attempt %d/%d) at %s", 
+				taskID, newRetryCount, *task.MaxRetries, nextRetry.Format(time.RFC3339))
+		} else {
+			// Permanent failure or max retries exceeded
+			task.Status = "failed"
+			task.CompletedAt = timePtr(time.Now())
+			
+			if reason != "" {
+				log.Printf("Task %s marked as failed: %s", taskID, reason)
+			}
+		}
+	}
+
+	// Save updated task
+	if err := a.store.GetDB().Save(&task).Error; err != nil {
+		return fmt.Errorf("failed to save task: %w", err)
+	}
+
+	return nil
+}
+
+// categorizeError determines error category for retry decisions
+func categorizeError(errorMsg string) string {
+	if errorMsg == "" {
+		return "unknown"
+	}
+
+	lowerMsg := strings.ToLower(errorMsg)
+
+	// Network errors
+	if strings.Contains(lowerMsg, "timeout") ||
+		strings.Contains(lowerMsg, "connection refused") ||
+		strings.Contains(lowerMsg, "network") {
+		return "network"
+	}
+
+	// Transient errors
+	if strings.Contains(lowerMsg, "locked") ||
+		strings.Contains(lowerMsg, "temporarily unavailable") {
+		return "transient"
+	}
+
+	// Permission errors
+	if strings.Contains(lowerMsg, "permission denied") ||
+		strings.Contains(lowerMsg, "access denied") ||
+		strings.Contains(lowerMsg, "forbidden") {
+		return "permission"
+	}
+
+	// Repository errors
+	if strings.Contains(lowerMsg, "not found") ||
+		strings.Contains(lowerMsg, "invalid repository") {
+		return "repository"
+	}
+
+	return "unknown"
+}
+
+// timePtr is a helper to get a pointer to a time value
+func timePtr(t time.Time) *time.Time {
+	return &t
 }

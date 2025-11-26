@@ -11,6 +11,19 @@ import (
 	"github.com/google/uuid"
 )
 
+// TaskTypeCount represents the count of running tasks by type
+type TaskTypeCount struct {
+	TaskType string `json:"taskType"`
+	Count    int    `json:"count"`
+}
+
+// TaskTypeCapacity represents available capacity by task type
+type TaskTypeCapacity struct {
+	TaskType  string `json:"taskType"`
+	Available int    `json:"available"`
+	Maximum   int    `json:"maximum"`
+}
+
 // HeartbeatPayload represents the data sent to the orchestrator in a heartbeat
 type HeartbeatPayload struct {
 	AgentVersion  string     `json:"agentVersion"`
@@ -20,6 +33,11 @@ type HeartbeatPayload struct {
 	DiskUsageMB   int64      `json:"diskUsageMB,omitempty"`
 	LastBackupAt  *time.Time `json:"lastBackupAt,omitempty"`
 	HeartbeatAt   time.Time  `json:"heartbeatAt"`
+	// Load information (EPIC 15 Phase 3)
+	CurrentTasksCount    *int                `json:"currentTasksCount,omitempty"`
+	RunningTaskTypes     []TaskTypeCount     `json:"runningTaskTypes,omitempty"`
+	AvailableSlots       *int                `json:"availableSlots,omitempty"`
+	AvailableSlotsByType []TaskTypeCapacity  `json:"availableSlotsByType,omitempty"`
 }
 
 // HeartbeatResponse represents the response from the orchestrator
@@ -128,4 +146,67 @@ func (hc *HeartbeatClient) sendHeartbeatOnce() error {
 	hc.state.LastHeartbeat = time.Now()
 
 	return nil
+}
+
+// BuildHeartbeatPayloadWithLoad creates a heartbeat payload with load information
+func BuildHeartbeatPayloadWithLoad(executor *TaskExecutor, version string, uptimeSeconds int64) *HeartbeatPayload {
+	payload := &HeartbeatPayload{
+		AgentVersion:  version,
+		Platform:      runtime.GOOS,
+		Architecture:  runtime.GOARCH,
+		UptimeSeconds: uptimeSeconds,
+		HeartbeatAt:   time.Now(),
+	}
+
+	// Only include load information if executor has concurrency config
+	if executor == nil || executor.config == nil {
+		return payload
+	}
+
+	// Current tasks count
+	currentCount := executor.GetRunningTaskCount()
+	payload.CurrentTasksCount = &currentCount
+
+	// Available slots
+	availableSlots := executor.GetAvailableSlots()
+	payload.AvailableSlots = &availableSlots
+
+	// Running task types breakdown
+	executor.mu.RLock()
+	typeCounts := make(map[string]int)
+	for _, taskType := range executor.runningTasks {
+		typeCounts[taskType]++
+	}
+	executor.mu.RUnlock()
+
+	runningTypes := make([]TaskTypeCount, 0, len(typeCounts))
+	for taskType, count := range typeCounts {
+		runningTypes = append(runningTypes, TaskTypeCount{
+			TaskType: taskType,
+			Count:    count,
+		})
+	}
+	payload.RunningTaskTypes = runningTypes
+
+	// Available slots by type
+	availableByType := []TaskTypeCapacity{
+		{
+			TaskType:  "backup",
+			Available: executor.GetAvailableSlotsByType("backup"),
+			Maximum:   executor.config.MaxConcurrentBackups,
+		},
+		{
+			TaskType:  "check",
+			Available: executor.GetAvailableSlotsByType("check"),
+			Maximum:   executor.config.MaxConcurrentChecks,
+		},
+		{
+			TaskType:  "prune",
+			Available: executor.GetAvailableSlotsByType("prune"),
+			Maximum:   executor.config.MaxConcurrentPrunes,
+		},
+	}
+	payload.AvailableSlotsByType = availableByType
+
+	return payload
 }

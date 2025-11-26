@@ -110,6 +110,10 @@ func GetAllMigrations(defaultTenantID uuid.UUID) []Migration {
 		GetMigration003AddPolicyFields(),
 		GetMigration004CreatePolicyTaskStates(),
 		GetMigration005AddScheduleTypes(),
+		GetMigration006AddAgentConcurrencySettings(),
+		GetMigration007AddTaskRetryTracking(),
+		GetMigration008AddPolicyMaxRetries(),
+		GetMigration009AddAgentBackoffState(),
 	}
 }
 
@@ -298,6 +302,70 @@ func GetMigration005AddScheduleTypes() Migration {
 			// GORM AutoMigrate handles adding new columns gracefully
 			if err := tx.AutoMigrate(&Policy{}); err != nil {
 				return fmt.Errorf("adding schedule type fields to policies: %w", err)
+			}
+			return nil
+		},
+	}
+}
+
+// GetMigration006AddAgentConcurrencySettings adds concurrency and quota fields to agents table
+func GetMigration006AddAgentConcurrencySettings() Migration {
+	return Migration{
+		Version:     "006",
+		Description: "Add concurrency and quota settings to agents table (max_concurrent_tasks, max_concurrent_backups, max_concurrent_checks, max_concurrent_prunes, cpu_quota_percent, bandwidth_limit_mbps)",
+		Up: func(tx *gorm.DB) error {
+			// Add new columns to agents table
+			// GORM AutoMigrate handles adding new columns gracefully
+			if err := tx.AutoMigrate(&Agent{}); err != nil {
+				return fmt.Errorf("adding concurrency fields to agents: %w", err)
+			}
+			return nil
+		},
+	}
+}
+
+// GetMigration007AddTaskRetryTracking adds retry tracking fields to tasks table
+func GetMigration007AddTaskRetryTracking() Migration {
+	return Migration{
+		Version:     "007",
+		Description: "Add retry tracking to tasks table (retry_count, max_retries, next_retry_at, last_error_category)",
+		Up: func(tx *gorm.DB) error {
+			// Add new columns to tasks table
+			// GORM AutoMigrate handles adding new columns gracefully
+			if err := tx.AutoMigrate(&Task{}); err != nil {
+				return fmt.Errorf("adding retry fields to tasks: %w", err)
+			}
+			return nil
+		},
+	}
+}
+
+// GetMigration008AddPolicyMaxRetries adds max_retries field to policies table
+func GetMigration008AddPolicyMaxRetries() Migration {
+	return Migration{
+		Version:     "008",
+		Description: "Add max_retries to policies table for policy-level retry budget control",
+		Up: func(tx *gorm.DB) error {
+			// Add max_retries column to policies table
+			// GORM AutoMigrate handles adding new columns gracefully
+			if err := tx.AutoMigrate(&Policy{}); err != nil {
+				return fmt.Errorf("adding max_retries to policies: %w", err)
+			}
+			return nil
+		},
+	}
+}
+
+// GetMigration009AddAgentBackoffState adds backoff state tracking to agents table
+func GetMigration009AddAgentBackoffState() Migration {
+	return Migration{
+		Version:     "009",
+		Description: "Add backoff state tracking to agents table (tasks_in_backoff, earliest_retry_at)",
+		Up: func(tx *gorm.DB) error {
+			// Add backoff state columns to agents table
+			// GORM AutoMigrate handles adding new columns gracefully
+			if err := tx.AutoMigrate(&Agent{}); err != nil {
+				return fmt.Errorf("adding backoff state to agents: %w", err)
 			}
 			return nil
 		},

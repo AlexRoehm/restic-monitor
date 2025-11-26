@@ -13,6 +13,30 @@ import (
 	"gorm.io/gorm"
 )
 
+// TaskResponse represents a task with calculated retry metadata
+type TaskResponse struct {
+	store.Task
+	RetriesRemaining *int `json:"retries_remaining,omitempty"`
+}
+
+// buildTaskResponse creates a TaskResponse with calculated fields
+func buildTaskResponse(task store.Task) TaskResponse {
+	resp := TaskResponse{
+		Task: task,
+	}
+	
+	// Calculate retries remaining
+	if task.RetryCount != nil && task.MaxRetries != nil {
+		remaining := *task.MaxRetries - *task.RetryCount
+		if remaining < 0 {
+			remaining = 0
+		}
+		resp.RetriesRemaining = &remaining
+	}
+	
+	return resp
+}
+
 // handleGetAgentTasks retrieves pending tasks for an agent and assigns them
 // GET /agents/{agentId}/tasks?limit=10
 func (a *API) handleGetAgentTasks(w http.ResponseWriter, r *http.Request) {
@@ -71,9 +95,15 @@ func (a *API) handleGetAgentTasks(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[TASKS] Assigned %d task(s) to agent %s", len(tasks), agentID)
 
+	// Build response with retry metadata
+	taskResponses := make([]TaskResponse, len(tasks))
+	for i, task := range tasks {
+		taskResponses[i] = buildTaskResponse(task)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"tasks": tasks,
+		"tasks": taskResponses,
 	})
 }
 

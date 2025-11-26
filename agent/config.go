@@ -20,12 +20,14 @@ type Config struct {
 	LogFile                  string `yaml:"logFile"`
 	PollingIntervalSeconds   int    `yaml:"pollingIntervalSeconds"`
 	HeartbeatIntervalSeconds int    `yaml:"heartbeatIntervalSeconds"`
-	MaxConcurrentJobs        int    `yaml:"maxConcurrentJobs"`
+	MaxConcurrentJobs        int    `yaml:"maxConcurrentJobs"` // Deprecated: Use Concurrency settings
 	HTTPTimeoutSeconds       int    `yaml:"httpTimeoutSeconds"`
 	RetryMaxAttempts         int    `yaml:"retryMaxAttempts"`
 	RetryBackoffSeconds      int    `yaml:"retryBackoffSeconds"`
 	StateFile                string `yaml:"stateFile"`
 	TempDir                  string `yaml:"tempDir"`
+	// Concurrency and quota settings (EPIC 15)
+	Concurrency ConcurrencyConfig `yaml:"concurrency"`
 }
 
 // LoadConfig loads and validates the agent configuration from a YAML file
@@ -75,6 +77,9 @@ func applyDefaults(cfg *Config) {
 	if cfg.TempDir == "" {
 		cfg.TempDir = "/tmp/restic-agent"
 	}
+
+	// Apply concurrency defaults
+	ApplyConcurrencyDefaults(&cfg.Concurrency)
 }
 
 // applyEnvironmentOverrides applies environment variable overrides to the configuration
@@ -198,6 +203,11 @@ func validateConfig(cfg *Config) error {
 	}
 	if cfg.RetryBackoffSeconds < 1 || cfg.RetryBackoffSeconds > 60 {
 		errors = append(errors, "retryBackoffSeconds must be between 1 and 60")
+	}
+
+	// Validate concurrency settings
+	if err := ValidateConcurrencyConfig(&cfg.Concurrency); err != nil {
+		errors = append(errors, fmt.Sprintf("concurrency: %s", err.Error()))
 	}
 
 	if len(errors) > 0 {

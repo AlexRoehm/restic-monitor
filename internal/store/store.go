@@ -348,8 +348,10 @@ func (s *Store) CreateTask(ctx context.Context, task *Task) error {
 // GetPendingTasks retrieves all pending tasks for an agent
 func (s *Store) GetPendingTasks(ctx context.Context, agentID uuid.UUID) ([]Task, error) {
 	var tasks []Task
+	now := time.Now()
 	err := s.db.WithContext(ctx).
 		Where("agent_id = ? AND status = ? AND tenant_id = ?", agentID, "pending", s.tenantID).
+		Where("next_retry_at IS NULL OR next_retry_at <= ?", now).
 		Order("created_at asc").
 		Find(&tasks).Error
 	return tasks, err

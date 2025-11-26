@@ -15,6 +15,12 @@ import (
 // TaskExecutor executes backup/check/prune tasks using Restic
 type TaskExecutor struct {
 	resticBinary string
+	config       *ConcurrencyConfig
+	// Concurrency tracking (EPIC 15)
+	totalLimiter *ConcurrencyLimiter
+	typeLimiters map[string]*ConcurrencyLimiter
+	runningTasks map[string]string // taskID -> taskType
+	mu           sync.RWMutex
 }
 
 // TaskResult represents the result of task execution
@@ -34,6 +40,107 @@ type TaskResult struct {
 func NewTaskExecutor(resticBinary string) *TaskExecutor {
 	return &TaskExecutor{
 		resticBinary: resticBinary,
+		config:       nil,
+		runningTasks: make(map[string]string),
+	}
+}
+
+// NewTaskExecutorWithConcurrency creates a new task executor with concurrency limits
+func NewTaskExecutorWithConcurrency(resticBinary string, config *ConcurrencyConfig) *TaskExecutor {
+	executor := &TaskExecutor{
+		resticBinary: resticBinary,
+		config:       config,
+		totalLimiter: NewConcurrencyLimiter(config.MaxConcurrentTasks),
+		typeLimiters: make(map[string]*ConcurrencyLimiter),
+		runningTasks: make(map[string]string),
+	}
+
+	// Create per-type limiters
+	executor.typeLimiters["backup"] = NewConcurrencyLimiter(config.MaxConcurrentBackups)
+	executor.typeLimiters["check"] = NewConcurrencyLimiter(config.MaxConcurrentChecks)
+	executor.typeLimiters["prune"] = NewConcurrencyLimiter(config.MaxConcurrentPrunes)
+
+	return executor
+}
+
+// GetRunningTaskCount returns the number of currently running tasks
+func (e *TaskExecutor) GetRunningTaskCount() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return len(e.runningTasks)
+}
+
+// GetRunningTaskCountByType returns the number of running tasks of a specific type
+func (e *TaskExecutor) GetRunningTaskCountByType(taskType string) int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	
+	count := 0
+	for _, t := range e.runningTasks {
+		if t == taskType {
+			count++
+		}
+	}
+	return count
+}
+
+// GetAvailableSlots returns the number of available task slots
+func (e *TaskExecutor) GetAvailableSlots() int {
+	if e.totalLimiter == nil {
+		return 0
+	}
+	return e.totalLimiter.Available()
+}
+
+// GetAvailableSlotsByType returns the number of available slots for a specific task type
+func (e *TaskExecutor) GetAvailableSlotsByType(taskType string) int {
+	if e.typeLimiters == nil {
+		return 0
+	}
+	limiter, ok := e.typeLimiters[taskType]
+	if !ok {
+		return 0
+	}
+	return limiter.Available()
+}
+
+// acquireConcurrencySlots acquires concurrency slots for task execution
+func (e *TaskExecutor) acquireConcurrencySlots(task Task) {
+	// Acquire total concurrency slot
+	if e.totalLimiter != nil {
+		e.totalLimiter.Acquire()
+	}
+
+	// Acquire per-type slot
+	if e.typeLimiters != nil {
+		if limiter, ok := e.typeLimiters[task.TaskType]; ok {
+			limiter.Acquire()
+		}
+	}
+
+	// Track running task
+	e.mu.Lock()
+	e.runningTasks[task.TaskID] = task.TaskType
+	e.mu.Unlock()
+}
+
+// releaseConcurrencySlots releases concurrency slots after task completion
+func (e *TaskExecutor) releaseConcurrencySlots(task Task) {
+	// Remove from running tasks
+	e.mu.Lock()
+	delete(e.runningTasks, task.TaskID)
+	e.mu.Unlock()
+
+	// Release per-type slot
+	if e.typeLimiters != nil {
+		if limiter, ok := e.typeLimiters[task.TaskType]; ok {
+			limiter.Release()
+		}
+	}
+
+	// Release total concurrency slot
+	if e.totalLimiter != nil {
+		e.totalLimiter.Release()
 	}
 }
 
@@ -81,9 +188,24 @@ func (e *TaskExecutor) buildBackupArgs(task Task) []string {
 		}
 	}
 
-	// Add execution parameters
+	// Add bandwidth limit from concurrency config (EPIC 15)
+	if e.config != nil && e.config.BandwidthLimitMbps != nil {
+		// Convert Mbps to Kbps (restic uses --limit-upload in KB/s)
+		kbps := *e.config.BandwidthLimitMbps * 1024
+		args = append(args, fmt.Sprintf("--limit-upload=%d", kbps))
+	}
+
+	// Add execution parameters (task-specific overrides)
 	if task.ExecutionParams != nil {
+		// Task-specific bandwidth limit overrides config
 		if bw, ok := task.ExecutionParams["bandwidthLimitKbps"].(float64); ok {
+			// Remove config bandwidth if task has override
+			for i, arg := range args {
+				if strings.HasPrefix(arg, "--limit-upload=") {
+					args = append(args[:i], args[i+1:]...)
+					break
+				}
+			}
 			args = append(args, fmt.Sprintf("--limit-upload=%d", int(bw)))
 		}
 		if par, ok := task.ExecutionParams["parallelism"].(float64); ok {
@@ -141,6 +263,10 @@ func (e *TaskExecutor) Execute(task Task) (TaskResult, error) {
 
 // ExecuteWithEnv runs the task with custom environment variables
 func (e *TaskExecutor) ExecuteWithEnv(task Task, env map[string]string) (TaskResult, error) {
+	// Acquire concurrency slots (blocks if at capacity)
+	e.acquireConcurrencySlots(task)
+	defer e.releaseConcurrencySlots(task)
+
 	startTime := time.Now()
 
 	result := TaskResult{
@@ -689,6 +815,23 @@ type ExecutionMetrics struct {
 	bytesProcessed  int64
 	totalDuration   float64
 	concurrentTasks int
+	
+	// Phase 7: Retry and backoff metrics
+	tasksRetried       int64
+	backoffEvents      int64
+	permanentFailures  int64
+	tasksExhausted     int64 // Tasks that hit max retry limit
+	
+	// Phase 7: Concurrency events
+	concurrencyLimitReached int64
+	quotaExceededEvents     int64
+	
+	// Phase 7: Error categories
+	networkErrors   int64
+	resourceErrors  int64
+	authErrors      int64
+	permanentErrors int64
+	
 	mu              sync.RWMutex
 }
 
@@ -818,4 +961,129 @@ func (em *ExecutionMetrics) GetSnapshot() ExecutionMetricsSnapshot {
 		ConcurrentTasks: em.concurrentTasks,
 		Timestamp:       time.Now(),
 	}
+}
+
+// Phase 7: Retry and backoff metric methods
+
+// RecordTaskRetry records a task retry attempt with error category
+func (em *ExecutionMetrics) RecordTaskRetry(errorCategory string) {
+	em.mu.Lock()
+	defer em.mu.Unlock()
+	em.tasksRetried++
+	
+	switch errorCategory {
+	case "network":
+		em.networkErrors++
+	case "resource":
+		em.resourceErrors++
+	case "auth":
+		em.authErrors++
+	case "permanent":
+		em.permanentErrors++
+	}
+}
+
+// RecordBackoffEvent records when a task enters backoff
+func (em *ExecutionMetrics) RecordBackoffEvent() {
+	em.mu.Lock()
+	defer em.mu.Unlock()
+	em.backoffEvents++
+}
+
+// RecordPermanentFailure records a task that will not be retried
+func (em *ExecutionMetrics) RecordPermanentFailure() {
+	em.mu.Lock()
+	defer em.mu.Unlock()
+	em.permanentFailures++
+}
+
+// RecordTaskExhausted records a task that hit max retry limit
+func (em *ExecutionMetrics) RecordTaskExhausted() {
+	em.mu.Lock()
+	defer em.mu.Unlock()
+	em.tasksExhausted++
+}
+
+// RecordConcurrencyLimitReached records when concurrency limit is hit
+func (em *ExecutionMetrics) RecordConcurrencyLimitReached() {
+	em.mu.Lock()
+	defer em.mu.Unlock()
+	em.concurrencyLimitReached++
+}
+
+// RecordQuotaExceeded records when quota limits are applied
+func (em *ExecutionMetrics) RecordQuotaExceeded() {
+	em.mu.Lock()
+	defer em.mu.Unlock()
+	em.quotaExceededEvents++
+}
+
+// GetTasksRetried returns the total number of retry attempts
+func (em *ExecutionMetrics) GetTasksRetried() int64 {
+	em.mu.RLock()
+	defer em.mu.RUnlock()
+	return em.tasksRetried
+}
+
+// GetBackoffEvents returns the total number of backoff events
+func (em *ExecutionMetrics) GetBackoffEvents() int64 {
+	em.mu.RLock()
+	defer em.mu.RUnlock()
+	return em.backoffEvents
+}
+
+// GetPermanentFailures returns the total number of permanent failures
+func (em *ExecutionMetrics) GetPermanentFailures() int64 {
+	em.mu.RLock()
+	defer em.mu.RUnlock()
+	return em.permanentFailures
+}
+
+// GetTasksExhausted returns the total number of tasks that hit max retries
+func (em *ExecutionMetrics) GetTasksExhausted() int64 {
+	em.mu.RLock()
+	defer em.mu.RUnlock()
+	return em.tasksExhausted
+}
+
+// GetConcurrencyLimitReached returns the number of times concurrency limit was hit
+func (em *ExecutionMetrics) GetConcurrencyLimitReached() int64 {
+	em.mu.RLock()
+	defer em.mu.RUnlock()
+	return em.concurrencyLimitReached
+}
+
+// GetQuotaExceededEvents returns the number of quota exceeded events
+func (em *ExecutionMetrics) GetQuotaExceededEvents() int64 {
+	em.mu.RLock()
+	defer em.mu.RUnlock()
+	return em.quotaExceededEvents
+}
+
+// GetNetworkErrors returns the number of network-related errors
+func (em *ExecutionMetrics) GetNetworkErrors() int64 {
+	em.mu.RLock()
+	defer em.mu.RUnlock()
+	return em.networkErrors
+}
+
+// GetResourceErrors returns the number of resource-related errors
+func (em *ExecutionMetrics) GetResourceErrors() int64 {
+	em.mu.RLock()
+	defer em.mu.RUnlock()
+	return em.resourceErrors
+}
+
+// GetAuthErrors returns the number of authentication errors
+func (em *ExecutionMetrics) GetAuthErrors() int64 {
+	em.mu.RLock()
+	defer em.mu.RUnlock()
+	return em.authErrors
+}
+
+// GetPermanentErrors returns the number of permanent errors
+func (em *ExecutionMetrics) GetPermanentErrors() int64 {
+	em.mu.RLock()
+	defer em.mu.RUnlock()
+	return em.permanentErrors
 }

@@ -228,6 +228,7 @@ func (s *Scheduler) processPolicyScheduleType(ctx context.Context, policy *store
 			IncludePaths: policy.IncludePaths,
 			ExcludePaths: policy.ExcludePaths,
 			Retention:    policy.RetentionRules,
+			MaxRetries:   policy.MaxRetries, // EPIC 15 Phase 5: inherit retry budget from policy
 		}
 
 		if err := s.store.CreateTask(ctx, task); err != nil {

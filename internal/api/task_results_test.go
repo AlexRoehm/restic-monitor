@@ -382,3 +382,354 @@ func setupTestAPIForTaskResults(t *testing.T) (*API, *store.Store) {
 	api := New(config.Config{}, st, nil, "")
 	return api, st
 }
+
+// ========================================
+// EPIC 15 Phase 4: Task Retry Logic Tests
+// ========================================
+
+// TestTaskResultRetryOnFailure tests that failed tasks are marked for retry
+func TestTaskResultRetryOnFailure(t *testing.T) {
+	api, st := setupTestAPIForTaskResults(t)
+	ctx := context.Background()
+
+	// Create test agent and policy
+	tenantID := st.GetTenantID()
+	agent := store.Agent{
+		ID:       uuid.New(),
+		TenantID: tenantID,
+		Hostname: "test-agent",
+		OS:       "linux",
+		Arch:     "amd64",
+		Version:  "1.0.0",
+		Status:   "online",
+	}
+	err := st.CreateAgent(ctx, &agent)
+	require.NoError(t, err)
+
+	policy := store.Policy{
+		ID:             uuid.New(),
+		TenantID:       tenantID,
+		Name:           "test-policy",
+		Schedule:       "0 0 * * *",
+		IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+		RepositoryURL:  "s3://bucket/repo",
+		RepositoryType: "s3",
+		RetentionRules: store.JSONB{"keepLast": 7},
+		Enabled:        true,
+	}
+	err = st.CreatePolicy(ctx, &policy)
+	require.NoError(t, err)
+
+	// Create task
+	taskID := uuid.New()
+	task := store.Task{
+		ID:         taskID,
+		TenantID:   tenantID,
+		AgentID:    agent.ID,
+		PolicyID:   policy.ID,
+		TaskType:   "backup",
+		Status:     "in-progress",
+		Repository: "s3://bucket/repo",
+	}
+	err = st.CreateTask(ctx, &task)
+	require.NoError(t, err)
+
+	// Submit failure result with transient error
+	payload := map[string]interface{}{
+		"taskId":          taskID.String(),
+		"policyId":        policy.ID.String(),
+		"taskType":        "backup",
+		"status":          "failed",
+		"durationSeconds": 10.5,
+		"log":             "Connection timeout",
+		"errorMessage":    "network timeout",
+	}
+
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest("POST", "/agents/"+agent.ID.String()+"/task-results", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	api.handleTaskResults(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify task was updated with retry state
+	var updatedTask store.Task
+	err = st.GetDB().Where("id = ?", taskID).First(&updatedTask).Error
+	require.NoError(t, err)
+	
+	assert.Equal(t, "pending", updatedTask.Status, "Task should be pending for retry")
+	assert.NotNil(t, updatedTask.RetryCount)
+	assert.Equal(t, 1, *updatedTask.RetryCount, "Retry count should be 1")
+	assert.NotNil(t, updatedTask.NextRetryAt, "Next retry time should be set")
+	assert.NotNil(t, updatedTask.LastErrorCategory)
+	assert.Equal(t, "network", *updatedTask.LastErrorCategory)
+}
+
+// TestTaskResultResetRetryOnSuccess tests that successful tasks reset retry state
+func TestTaskResultResetRetryOnSuccess(t *testing.T) {
+	api, st := setupTestAPIForTaskResults(t)
+	ctx := context.Background()
+
+	// Create test agent and policy
+	tenantID := st.GetTenantID()
+	agent := store.Agent{
+		ID:       uuid.New(),
+		TenantID: tenantID,
+		Hostname: "test-agent",
+		OS:       "linux",
+		Arch:     "amd64",
+		Version:  "1.0.0",
+		Status:   "online",
+	}
+	err := st.CreateAgent(ctx, &agent)
+	require.NoError(t, err)
+
+	policy := store.Policy{
+		ID:             uuid.New(),
+		TenantID:       tenantID,
+		Name:           "test-policy",
+		Schedule:       "0 0 * * *",
+		IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+		RepositoryURL:  "s3://bucket/repo",
+		RepositoryType: "s3",
+		RetentionRules: store.JSONB{"keepLast": 7},
+		Enabled:        true,
+	}
+	err = st.CreatePolicy(ctx, &policy)
+	require.NoError(t, err)
+
+	// Create task with existing retry state
+	taskID := uuid.New()
+	retryCount := 2
+	maxRetries := 3
+	errorCategory := "network"
+	task := store.Task{
+		ID:                taskID,
+		TenantID:          tenantID,
+		AgentID:           agent.ID,
+		PolicyID:          policy.ID,
+		TaskType:          "backup",
+		Status:            "in-progress",
+		Repository:        "s3://bucket/repo",
+		RetryCount:        &retryCount,
+		MaxRetries:        &maxRetries,
+		LastErrorCategory: &errorCategory,
+	}
+	err = st.CreateTask(ctx, &task)
+	require.NoError(t, err)
+
+	// Submit success result
+	payload := map[string]interface{}{
+		"taskId":          taskID.String(),
+		"policyId":        policy.ID.String(),
+		"taskType":        "backup",
+		"status":          "success",
+		"durationSeconds": 45.2,
+		"log":             "Backup completed successfully",
+		"snapshotId":      "snap123",
+	}
+
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest("POST", "/agents/"+agent.ID.String()+"/task-results", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	api.handleTaskResults(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify retry state was reset
+	var updatedTask store.Task
+	err = st.GetDB().Where("id = ?", taskID).First(&updatedTask).Error
+	require.NoError(t, err)
+	
+	assert.Equal(t, "completed", updatedTask.Status)
+	assert.NotNil(t, updatedTask.RetryCount)
+	assert.Equal(t, 0, *updatedTask.RetryCount, "Retry count should be reset to 0")
+	assert.Nil(t, updatedTask.NextRetryAt, "Next retry time should be nil")
+	assert.Nil(t, updatedTask.LastErrorCategory, "Error category should be cleared")
+	assert.NotNil(t, updatedTask.CompletedAt)
+}
+
+// TestTaskResultMaxRetriesExceeded tests that tasks exceeding max retries are marked as failed
+func TestTaskResultMaxRetriesExceeded(t *testing.T) {
+	api, st := setupTestAPIForTaskResults(t)
+	ctx := context.Background()
+
+	// Create test agent and policy
+	tenantID := st.GetTenantID()
+	agent := store.Agent{
+		ID:       uuid.New(),
+		TenantID: tenantID,
+		Hostname: "test-agent",
+		OS:       "linux",
+		Arch:     "amd64",
+		Version:  "1.0.0",
+		Status:   "online",
+	}
+	err := st.CreateAgent(ctx, &agent)
+	require.NoError(t, err)
+
+	policy := store.Policy{
+		ID:             uuid.New(),
+		TenantID:       tenantID,
+		Name:           "test-policy",
+		Schedule:       "0 0 * * *",
+		IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+		RepositoryURL:  "s3://bucket/repo",
+		RepositoryType: "s3",
+		RetentionRules: store.JSONB{"keepLast": 7},
+		Enabled:        true,
+	}
+	err = st.CreatePolicy(ctx, &policy)
+	require.NoError(t, err)
+
+	// Create task at max retries
+	taskID := uuid.New()
+	retryCount := 3
+	maxRetries := 3
+	task := store.Task{
+		ID:         taskID,
+		TenantID:   tenantID,
+		AgentID:    agent.ID,
+		PolicyID:   policy.ID,
+		TaskType:   "backup",
+		Status:     "in-progress",
+		Repository: "s3://bucket/repo",
+		RetryCount: &retryCount,
+		MaxRetries: &maxRetries,
+	}
+	err = st.CreateTask(ctx, &task)
+	require.NoError(t, err)
+
+	// Submit failure result
+	payload := map[string]interface{}{
+		"taskId":          taskID.String(),
+		"policyId":        policy.ID.String(),
+		"taskType":        "backup",
+		"status":          "failed",
+		"durationSeconds": 5.0,
+		"errorMessage":    "timeout",
+	}
+
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest("POST", "/agents/"+agent.ID.String()+"/task-results", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	api.handleTaskResults(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify task is marked as permanently failed
+	var updatedTask store.Task
+	err = st.GetDB().Where("id = ?", taskID).First(&updatedTask).Error
+	require.NoError(t, err)
+	
+	assert.Equal(t, "failed", updatedTask.Status, "Task should be permanently failed")
+	assert.NotNil(t, updatedTask.CompletedAt, "Completed time should be set")
+}
+
+// TestTaskResultPermanentError tests that permanent errors don't trigger retry
+func TestTaskResultPermanentError(t *testing.T) {
+	api, st := setupTestAPIForTaskResults(t)
+	ctx := context.Background()
+
+	// Create test agent and policy
+	tenantID := st.GetTenantID()
+	agent := store.Agent{
+		ID:       uuid.New(),
+		TenantID: tenantID,
+		Hostname: "test-agent",
+		OS:       "linux",
+		Arch:     "amd64",
+		Version:  "1.0.0",
+		Status:   "online",
+	}
+	err := st.CreateAgent(ctx, &agent)
+	require.NoError(t, err)
+
+	policy := store.Policy{
+		ID:             uuid.New(),
+		TenantID:       tenantID,
+		Name:           "test-policy",
+		Schedule:       "0 0 * * *",
+		IncludePaths:   store.JSONB{"paths": []string{"/data"}},
+		RepositoryURL:  "s3://bucket/repo",
+		RepositoryType: "s3",
+		RetentionRules: store.JSONB{"keepLast": 7},
+		Enabled:        true,
+	}
+	err = st.CreatePolicy(ctx, &policy)
+	require.NoError(t, err)
+
+	// Create task
+	taskID := uuid.New()
+	task := store.Task{
+		ID:         taskID,
+		TenantID:   tenantID,
+		AgentID:    agent.ID,
+		PolicyID:   policy.ID,
+		TaskType:   "backup",
+		Status:     "in-progress",
+		Repository: "s3://bucket/repo",
+	}
+	err = st.CreateTask(ctx, &task)
+	require.NoError(t, err)
+
+	// Submit failure result with permanent error
+	payload := map[string]interface{}{
+		"taskId":          taskID.String(),
+		"policyId":        policy.ID.String(),
+		"taskType":        "backup",
+		"status":          "failed",
+		"durationSeconds": 2.0,
+		"errorMessage":    "permission denied: access to repository forbidden",
+	}
+
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest("POST", "/agents/"+agent.ID.String()+"/task-results", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	api.handleTaskResults(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify task is marked as permanently failed (no retry)
+	var updatedTask store.Task
+	err = st.GetDB().Where("id = ?", taskID).First(&updatedTask).Error
+	require.NoError(t, err)
+	
+	assert.Equal(t, "failed", updatedTask.Status, "Task should be permanently failed")
+	assert.Nil(t, updatedTask.NextRetryAt, "Should not schedule retry for permanent error")
+	assert.NotNil(t, updatedTask.CompletedAt)
+}
+
+// TestCategorizeError tests error categorization
+func TestCategorizeError(t *testing.T) {
+	tests := []struct {
+		name     string
+		error    string
+		expected string
+	}{
+		{"Network timeout", "connection timeout", "network"},
+		{"Network refused", "connection refused", "network"},
+		{"Locked repo", "repository is locked", "transient"},
+		{"Permission denied", "permission denied", "permission"},
+		{"Access denied", "access denied", "permission"},
+		{"Not found", "repository not found", "repository"},
+		{"Invalid repo", "invalid repository", "repository"},
+		{"Unknown error", "something went wrong", "unknown"},
+		{"Empty error", "", "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := categorizeError(tt.error)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

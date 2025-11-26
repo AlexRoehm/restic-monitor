@@ -23,8 +23,18 @@ type Agent struct {
 	UptimeSeconds    *int64     `json:"uptime_seconds,omitempty"`
 	FreeDisk         JSONB      `gorm:"serializer:json" json:"free_disk,omitempty"` // Array of {mountPath, freeBytes, totalBytes}
 	Metadata         JSONB      `gorm:"serializer:json" json:"metadata,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	// Concurrency and quota settings (EPIC 15)
+	MaxConcurrentTasks   *int `gorm:"default:3" json:"max_concurrent_tasks,omitempty"`
+	MaxConcurrentBackups *int `gorm:"default:1" json:"max_concurrent_backups,omitempty"`
+	MaxConcurrentChecks  *int `gorm:"default:1" json:"max_concurrent_checks,omitempty"`
+	MaxConcurrentPrunes  *int `gorm:"default:1" json:"max_concurrent_prunes,omitempty"`
+	CPUQuotaPercent      *int `gorm:"default:50" json:"cpu_quota_percent,omitempty"`
+	BandwidthLimitMbps   *int `json:"bandwidth_limit_mbps,omitempty"`
+	// Backoff state tracking (EPIC 15 Phase 6)
+	TasksInBackoff       *int       `gorm:"default:0" json:"tasks_in_backoff,omitempty"`
+	EarliestRetryAt      *time.Time `gorm:"index" json:"earliest_retry_at,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 // TableName specifies the table name for Agent
@@ -57,6 +67,7 @@ type Policy struct {
 	RetentionRules     JSONB     `gorm:"serializer:json;not null" json:"retention_rules"`
 	BandwidthLimitKBps *int      `json:"bandwidth_limit_kbps,omitempty"`
 	ParallelFiles      *int      `json:"parallel_files,omitempty"`
+	MaxRetries         *int      `gorm:"default:3" json:"max_retries,omitempty"` // EPIC 15 Phase 5
 	Enabled            bool      `gorm:"not null" json:"enabled"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
@@ -196,6 +207,13 @@ type Task struct {
 	StartedAt       *time.Time `json:"started_at,omitempty"`
 	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 	ErrorMessage    *string    `gorm:"type:text" json:"error_message,omitempty"`
+	
+	// Retry tracking fields (EPIC 15)
+	RetryCount         *int       `gorm:"default:0" json:"retry_count,omitempty"`
+	MaxRetries         *int       `gorm:"default:3" json:"max_retries,omitempty"`
+	NextRetryAt        *time.Time `gorm:"index" json:"next_retry_at,omitempty"`
+	LastErrorCategory  *string    `gorm:"type:varchar(100)" json:"last_error_category,omitempty"`
+	
 	CreatedAt       time.Time  `gorm:"index" json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
