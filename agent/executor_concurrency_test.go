@@ -208,10 +208,10 @@ func TestConcurrencyConfigApplication(t *testing.T) {
 		executor := NewTaskExecutorWithConcurrency("restic", &config)
 
 		task := Task{
-			TaskID:         "test",
-			TaskType:       "backup",
-			Repository:     "/repo",
-			IncludePaths:   map[string]interface{}{"paths": []interface{}{"/data"}},
+			TaskID:          "test",
+			TaskType:        "backup",
+			Repository:      "/repo",
+			IncludePaths:    map[string]interface{}{"paths": []interface{}{"/data"}},
 			ExecutionParams: make(map[string]interface{}),
 		}
 
@@ -256,7 +256,7 @@ func TestConcurrencyMetrics(t *testing.T) {
 
 		// Simulate task start
 		task := Task{TaskID: "test", TaskType: "backup", Repository: "0.1"}
-		
+
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() {

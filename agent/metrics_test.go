@@ -299,32 +299,32 @@ func TestExecutionMetricsRetryTracking(t *testing.T) {
 	// Record network error retries
 	metrics.RecordTaskRetry("network")
 	metrics.RecordTaskRetry("network")
-	
+
 	if metrics.GetTasksRetried() != 2 {
 		t.Errorf("Expected 2 retries, got %d", metrics.GetTasksRetried())
 	}
-	
+
 	if metrics.GetNetworkErrors() != 2 {
 		t.Errorf("Expected 2 network errors, got %d", metrics.GetNetworkErrors())
 	}
-	
+
 	// Record other error types
 	metrics.RecordTaskRetry("resource")
 	metrics.RecordTaskRetry("auth")
 	metrics.RecordTaskRetry("permanent")
-	
+
 	if metrics.GetTasksRetried() != 5 {
 		t.Errorf("Expected 5 retries, got %d", metrics.GetTasksRetried())
 	}
-	
+
 	if metrics.GetResourceErrors() != 1 {
 		t.Errorf("Expected 1 resource error, got %d", metrics.GetResourceErrors())
 	}
-	
+
 	if metrics.GetAuthErrors() != 1 {
 		t.Errorf("Expected 1 auth error, got %d", metrics.GetAuthErrors())
 	}
-	
+
 	if metrics.GetPermanentErrors() != 1 {
 		t.Errorf("Expected 1 permanent error, got %d", metrics.GetPermanentErrors())
 	}
@@ -413,19 +413,19 @@ func TestExecutionMetricsErrorCategorization(t *testing.T) {
 	if metrics.GetNetworkErrors() != 5 {
 		t.Errorf("Expected 5 network errors, got %d", metrics.GetNetworkErrors())
 	}
-	
+
 	if metrics.GetResourceErrors() != 3 {
 		t.Errorf("Expected 3 resource errors, got %d", metrics.GetResourceErrors())
 	}
-	
+
 	if metrics.GetAuthErrors() != 2 {
 		t.Errorf("Expected 2 auth errors, got %d", metrics.GetAuthErrors())
 	}
-	
+
 	if metrics.GetPermanentErrors() != 1 {
 		t.Errorf("Expected 1 permanent error, got %d", metrics.GetPermanentErrors())
 	}
-	
+
 	if metrics.GetTasksRetried() != 11 {
 		t.Errorf("Expected 11 total retries, got %d", metrics.GetTasksRetried())
 	}
@@ -438,13 +438,13 @@ func TestExecutionMetricsMultipleEventTypes(t *testing.T) {
 	// Simulate various failure scenarios
 	metrics.RecordTaskRetry("network")
 	metrics.RecordBackoffEvent()
-	
+
 	metrics.RecordTaskRetry("network")
 	metrics.RecordBackoffEvent()
-	
+
 	metrics.RecordTaskRetry("network")
 	metrics.RecordTaskExhausted()
-	
+
 	metrics.RecordPermanentFailure()
 	metrics.RecordConcurrencyLimitReached()
 	metrics.RecordQuotaExceeded()
@@ -453,23 +453,23 @@ func TestExecutionMetricsMultipleEventTypes(t *testing.T) {
 	if metrics.GetTasksRetried() != 3 {
 		t.Errorf("Expected 3 retries, got %d", metrics.GetTasksRetried())
 	}
-	
+
 	if metrics.GetBackoffEvents() != 2 {
 		t.Errorf("Expected 2 backoff events, got %d", metrics.GetBackoffEvents())
 	}
-	
+
 	if metrics.GetTasksExhausted() != 1 {
 		t.Errorf("Expected 1 exhausted task, got %d", metrics.GetTasksExhausted())
 	}
-	
+
 	if metrics.GetPermanentFailures() != 1 {
 		t.Errorf("Expected 1 permanent failure, got %d", metrics.GetPermanentFailures())
 	}
-	
+
 	if metrics.GetConcurrencyLimitReached() != 1 {
 		t.Errorf("Expected 1 concurrency limit event, got %d", metrics.GetConcurrencyLimitReached())
 	}
-	
+
 	if metrics.GetQuotaExceededEvents() != 1 {
 		t.Errorf("Expected 1 quota exceeded event, got %d", metrics.GetQuotaExceededEvents())
 	}
@@ -498,11 +498,11 @@ func TestExecutionMetricsThreadSafety(t *testing.T) {
 	if metrics.GetTasksRetried() != 50 {
 		t.Errorf("Expected 50 retries, got %d", metrics.GetTasksRetried())
 	}
-	
+
 	if metrics.GetBackoffEvents() != 50 {
 		t.Errorf("Expected 50 backoff events, got %d", metrics.GetBackoffEvents())
 	}
-	
+
 	if metrics.GetConcurrencyLimitReached() != 50 {
 		t.Errorf("Expected 50 concurrency limit events, got %d", metrics.GetConcurrencyLimitReached())
 	}
@@ -516,39 +516,39 @@ func TestExecutionMetricsInitialState(t *testing.T) {
 	if metrics.GetTasksRetried() != 0 {
 		t.Errorf("Expected 0 retries, got %d", metrics.GetTasksRetried())
 	}
-	
+
 	if metrics.GetBackoffEvents() != 0 {
 		t.Errorf("Expected 0 backoff events, got %d", metrics.GetBackoffEvents())
 	}
-	
+
 	if metrics.GetPermanentFailures() != 0 {
 		t.Errorf("Expected 0 permanent failures, got %d", metrics.GetPermanentFailures())
 	}
-	
+
 	if metrics.GetTasksExhausted() != 0 {
 		t.Errorf("Expected 0 exhausted tasks, got %d", metrics.GetTasksExhausted())
 	}
-	
+
 	if metrics.GetConcurrencyLimitReached() != 0 {
 		t.Errorf("Expected 0 concurrency limit events, got %d", metrics.GetConcurrencyLimitReached())
 	}
-	
+
 	if metrics.GetQuotaExceededEvents() != 0 {
 		t.Errorf("Expected 0 quota exceeded events, got %d", metrics.GetQuotaExceededEvents())
 	}
-	
+
 	if metrics.GetNetworkErrors() != 0 {
 		t.Errorf("Expected 0 network errors, got %d", metrics.GetNetworkErrors())
 	}
-	
+
 	if metrics.GetResourceErrors() != 0 {
 		t.Errorf("Expected 0 resource errors, got %d", metrics.GetResourceErrors())
 	}
-	
+
 	if metrics.GetAuthErrors() != 0 {
 		t.Errorf("Expected 0 auth errors, got %d", metrics.GetAuthErrors())
 	}
-	
+
 	if metrics.GetPermanentErrors() != 0 {
 		t.Errorf("Expected 0 permanent errors, got %d", metrics.GetPermanentErrors())
 	}

@@ -14,22 +14,22 @@ import (
 
 // AgentBackoffResponse represents the backoff state of an agent
 type AgentBackoffResponse struct {
-	AgentID          uuid.UUID         `json:"agent_id"`
-	Hostname         string            `json:"hostname"`
-	TasksInBackoff   int               `json:"tasks_in_backoff"`
-	EarliestRetryAt  *time.Time        `json:"earliest_retry_at,omitempty"`
-	BackoffTasks     []BackoffTaskInfo `json:"backoff_tasks"`
-	LastUpdatedAt    time.Time         `json:"last_updated_at"`
+	AgentID         uuid.UUID         `json:"agent_id"`
+	Hostname        string            `json:"hostname"`
+	TasksInBackoff  int               `json:"tasks_in_backoff"`
+	EarliestRetryAt *time.Time        `json:"earliest_retry_at,omitempty"`
+	BackoffTasks    []BackoffTaskInfo `json:"backoff_tasks"`
+	LastUpdatedAt   time.Time         `json:"last_updated_at"`
 }
 
 // BackoffTaskInfo represents a task in backoff state
 type BackoffTaskInfo struct {
-	TaskID          uuid.UUID  `json:"task_id"`
-	TaskType        string     `json:"task_type"`
-	RetryCount      int        `json:"retry_count"`
-	MaxRetries      int        `json:"max_retries"`
-	NextRetryAt     time.Time  `json:"next_retry_at"`
-	ErrorCategory   string     `json:"error_category,omitempty"`
+	TaskID        uuid.UUID `json:"task_id"`
+	TaskType      string    `json:"task_type"`
+	RetryCount    int       `json:"retry_count"`
+	MaxRetries    int       `json:"max_retries"`
+	NextRetryAt   time.Time `json:"next_retry_at"`
+	ErrorCategory string    `json:"error_category,omitempty"`
 }
 
 // handleGetAgentBackoff returns backoff state for an agent
@@ -82,14 +82,14 @@ func (a *API) handleGetAgentBackoff(w http.ResponseWriter, r *http.Request) {
 	// Build response
 	backoffTasks := make([]BackoffTaskInfo, 0, len(tasks))
 	var earliestRetry *time.Time
-	
+
 	for _, task := range tasks {
 		if task.NextRetryAt != nil {
 			taskInfo := BackoffTaskInfo{
-				TaskID:     task.ID,
-				TaskType:   task.TaskType,
-				RetryCount: safeIntValue(task.RetryCount),
-				MaxRetries: safeIntValue(task.MaxRetries),
+				TaskID:      task.ID,
+				TaskType:    task.TaskType,
+				RetryCount:  safeIntValue(task.RetryCount),
+				MaxRetries:  safeIntValue(task.MaxRetries),
 				NextRetryAt: *task.NextRetryAt,
 			}
 			if task.LastErrorCategory != nil {
@@ -137,7 +137,7 @@ func (a *API) UpdateAgentBackoffState(agentID uuid.UUID) error {
 		Where("agent_id = ? AND status = ? AND next_retry_at > ?", agentID, "pending", now).
 		Order("next_retry_at ASC").
 		First(&earliestTask).Error
-	
+
 	var earliestRetryAt *time.Time
 	if err == nil && earliestTask.NextRetryAt != nil {
 		earliestRetryAt = earliestTask.NextRetryAt
@@ -148,17 +148,17 @@ func (a *API) UpdateAgentBackoffState(agentID uuid.UUID) error {
 	err = a.store.GetDB().Model(&store.Agent{}).
 		Where("id = ?", agentID).
 		Updates(map[string]interface{}{
-			"tasks_in_backoff": tasksCount,
+			"tasks_in_backoff":  tasksCount,
 			"earliest_retry_at": earliestRetryAt,
 		}).Error
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to update agent backoff state: %w", err)
 	}
 
-	log.Printf("Updated agent %s backoff state: %d tasks, earliest retry: %v", 
+	log.Printf("Updated agent %s backoff state: %d tasks, earliest retry: %v",
 		agentID, tasksCount, earliestRetryAt)
-	
+
 	return nil
 }
 

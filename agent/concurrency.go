@@ -21,7 +21,7 @@ func ApplyConcurrencyDefaults(cfg *ConcurrencyConfig) {
 	if cfg.MaxConcurrentTasks == 0 {
 		cfg.MaxConcurrentTasks = 3 // Default: allow 3 total concurrent tasks
 	}
-	
+
 	// Set per-type defaults only if they're zero
 	// These should sum to <= MaxConcurrentTasks
 	if cfg.MaxConcurrentBackups == 0 {
@@ -33,7 +33,7 @@ func ApplyConcurrencyDefaults(cfg *ConcurrencyConfig) {
 	if cfg.MaxConcurrentPrunes == 0 {
 		cfg.MaxConcurrentPrunes = 1
 	}
-	
+
 	if cfg.CPUQuotaPercent == 0 {
 		cfg.CPUQuotaPercent = 50
 	}

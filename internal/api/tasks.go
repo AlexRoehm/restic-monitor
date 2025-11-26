@@ -24,7 +24,7 @@ func buildTaskResponse(task store.Task) TaskResponse {
 	resp := TaskResponse{
 		Task: task,
 	}
-	
+
 	// Calculate retries remaining
 	if task.RetryCount != nil && task.MaxRetries != nil {
 		remaining := *task.MaxRetries - *task.RetryCount
@@ -33,7 +33,7 @@ func buildTaskResponse(task store.Task) TaskResponse {
 		}
 		resp.RetriesRemaining = &remaining
 	}
-	
+
 	return resp
 }
 

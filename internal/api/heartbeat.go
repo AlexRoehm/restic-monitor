@@ -40,10 +40,10 @@ type AgentHeartbeatRequest struct {
 	Disks            []DiskInfo `json:"disks,omitempty"`
 	LastBackupStatus string     `json:"lastBackupStatus,omitempty"` // success, failure, none, running
 	// Load information (EPIC 15 Phase 3)
-	CurrentTasksCount    *int                `json:"currentTasksCount,omitempty"`
-	RunningTaskTypes     []TaskTypeCount     `json:"runningTaskTypes,omitempty"`
-	AvailableSlots       *int                `json:"availableSlots,omitempty"`
-	AvailableSlotsByType []TaskTypeCapacity  `json:"availableSlotsByType,omitempty"`
+	CurrentTasksCount    *int               `json:"currentTasksCount,omitempty"`
+	RunningTaskTypes     []TaskTypeCount    `json:"runningTaskTypes,omitempty"`
+	AvailableSlots       *int               `json:"availableSlots,omitempty"`
+	AvailableSlotsByType []TaskTypeCapacity `json:"availableSlotsByType,omitempty"`
 }
 
 // AgentHeartbeatResponse represents the response to a heartbeat

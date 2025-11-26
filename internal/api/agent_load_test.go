@@ -39,10 +39,10 @@ func TestHeartbeatWithLoadInformation(t *testing.T) {
 	t.Run("Accept heartbeat with load information", func(t *testing.T) {
 		currentTasks := 2
 		availableSlots := 3
-		
+
 		payload := AgentHeartbeatRequest{
-			Version:       "1.0.0",
-			OS:            "linux",
+			Version:           "1.0.0",
+			OS:                "linux",
 			CurrentTasksCount: &currentTasks,
 			AvailableSlots:    &availableSlots,
 			RunningTaskTypes: []TaskTypeCount{

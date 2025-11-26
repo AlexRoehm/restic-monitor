@@ -34,10 +34,10 @@ type HeartbeatPayload struct {
 	LastBackupAt  *time.Time `json:"lastBackupAt,omitempty"`
 	HeartbeatAt   time.Time  `json:"heartbeatAt"`
 	// Load information (EPIC 15 Phase 3)
-	CurrentTasksCount    *int                `json:"currentTasksCount,omitempty"`
-	RunningTaskTypes     []TaskTypeCount     `json:"runningTaskTypes,omitempty"`
-	AvailableSlots       *int                `json:"availableSlots,omitempty"`
-	AvailableSlotsByType []TaskTypeCapacity  `json:"availableSlotsByType,omitempty"`
+	CurrentTasksCount    *int               `json:"currentTasksCount,omitempty"`
+	RunningTaskTypes     []TaskTypeCount    `json:"runningTaskTypes,omitempty"`
+	AvailableSlots       *int               `json:"availableSlots,omitempty"`
+	AvailableSlotsByType []TaskTypeCapacity `json:"availableSlotsByType,omitempty"`
 }
 
 // HeartbeatResponse represents the response from the orchestrator

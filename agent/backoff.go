@@ -53,17 +53,17 @@ func applyJitter(base time.Duration, jitter float64) time.Duration {
 
 	// Calculate jitter range
 	jitterAmount := float64(base) * jitter
-	
+
 	// Random value between -jitterAmount and +jitterAmount
 	randomJitter := (rand.Float64()*2 - 1) * jitterAmount
-	
+
 	result := time.Duration(float64(base) + randomJitter)
-	
+
 	// Ensure we don't go negative
 	if result < 0 {
 		result = 0
 	}
-	
+
 	return result
 }
 
@@ -121,7 +121,7 @@ func isPermanentError(errorMsg string) bool {
 func UpdateRetryInfo(current RetryInfo, errorMsg string, baseDelay, maxDelay time.Duration, jitter float64) RetryInfo {
 	newRetryCount := current.RetryCount + 1
 	nextRetry := CalculateNextRetryTime(newRetryCount, baseDelay, maxDelay, jitter, time.Now())
-	
+
 	// Log backoff event with structured information
 	log.Printf("[BACKOFF] Task entering backoff: retry=%d/%d, next_retry=%v, delay=%v, error=%q",
 		newRetryCount, current.MaxRetries, nextRetry.Format(time.RFC3339), time.Until(nextRetry), errorMsg)

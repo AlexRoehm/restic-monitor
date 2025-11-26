@@ -74,7 +74,7 @@ func (e *TaskExecutor) GetRunningTaskCount() int {
 func (e *TaskExecutor) GetRunningTaskCountByType(taskType string) int {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	
+
 	count := 0
 	for _, t := range e.runningTasks {
 		if t == taskType {
@@ -815,24 +815,24 @@ type ExecutionMetrics struct {
 	bytesProcessed  int64
 	totalDuration   float64
 	concurrentTasks int
-	
+
 	// Phase 7: Retry and backoff metrics
-	tasksRetried       int64
-	backoffEvents      int64
-	permanentFailures  int64
-	tasksExhausted     int64 // Tasks that hit max retry limit
-	
+	tasksRetried      int64
+	backoffEvents     int64
+	permanentFailures int64
+	tasksExhausted    int64 // Tasks that hit max retry limit
+
 	// Phase 7: Concurrency events
 	concurrencyLimitReached int64
 	quotaExceededEvents     int64
-	
+
 	// Phase 7: Error categories
 	networkErrors   int64
 	resourceErrors  int64
 	authErrors      int64
 	permanentErrors int64
-	
-	mu              sync.RWMutex
+
+	mu sync.RWMutex
 }
 
 // ExecutionMetricsSnapshot represents a point-in-time view of metrics
@@ -970,7 +970,7 @@ func (em *ExecutionMetrics) RecordTaskRetry(errorCategory string) {
 	em.mu.Lock()
 	defer em.mu.Unlock()
 	em.tasksRetried++
-	
+
 	switch errorCategory {
 	case "network":
 		em.networkErrors++

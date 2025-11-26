@@ -458,7 +458,7 @@ func TestTaskResultRetryOnFailure(t *testing.T) {
 	var updatedTask store.Task
 	err = st.GetDB().Where("id = ?", taskID).First(&updatedTask).Error
 	require.NoError(t, err)
-	
+
 	assert.Equal(t, "pending", updatedTask.Status, "Task should be pending for retry")
 	assert.NotNil(t, updatedTask.RetryCount)
 	assert.Equal(t, 1, *updatedTask.RetryCount, "Retry count should be 1")
@@ -544,7 +544,7 @@ func TestTaskResultResetRetryOnSuccess(t *testing.T) {
 	var updatedTask store.Task
 	err = st.GetDB().Where("id = ?", taskID).First(&updatedTask).Error
 	require.NoError(t, err)
-	
+
 	assert.Equal(t, "completed", updatedTask.Status)
 	assert.NotNil(t, updatedTask.RetryCount)
 	assert.Equal(t, 0, *updatedTask.RetryCount, "Retry count should be reset to 0")
@@ -627,7 +627,7 @@ func TestTaskResultMaxRetriesExceeded(t *testing.T) {
 	var updatedTask store.Task
 	err = st.GetDB().Where("id = ?", taskID).First(&updatedTask).Error
 	require.NoError(t, err)
-	
+
 	assert.Equal(t, "failed", updatedTask.Status, "Task should be permanently failed")
 	assert.NotNil(t, updatedTask.CompletedAt, "Completed time should be set")
 }
@@ -702,7 +702,7 @@ func TestTaskResultPermanentError(t *testing.T) {
 	var updatedTask store.Task
 	err = st.GetDB().Where("id = ?", taskID).First(&updatedTask).Error
 	require.NoError(t, err)
-	
+
 	assert.Equal(t, "failed", updatedTask.Status, "Task should be permanently failed")
 	assert.Nil(t, updatedTask.NextRetryAt, "Should not schedule retry for permanent error")
 	assert.NotNil(t, updatedTask.CompletedAt)

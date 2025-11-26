@@ -568,7 +568,7 @@ func TestMigration009AddAgentBackoffState(t *testing.T) {
 		var loaded store.Agent
 		err = db.First(&loaded, agent.ID).Error
 		require.NoError(t, err)
-		
+
 		// TasksInBackoff defaults to 0 (not NULL due to GORM default:0)
 		if loaded.TasksInBackoff != nil {
 			assert.Equal(t, 0, *loaded.TasksInBackoff, "tasks_in_backoff should default to 0")

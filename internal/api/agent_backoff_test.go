@@ -19,10 +19,10 @@ import (
 func setupTestAPIForBackoff(t *testing.T) (*API, *store.Store) {
 	st, err := store.NewWithTenant(":memory:", uuid.New())
 	require.NoError(t, err)
-	
+
 	cfg := config.Config{}
 	api := New(cfg, st, nil, "")
-	
+
 	return api, st
 }
 

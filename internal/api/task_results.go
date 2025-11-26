@@ -16,10 +16,10 @@ import (
 
 // Default retry configuration for tasks
 const (
-	DefaultMaxRetries     = 3
-	DefaultBaseDelay      = 5 * time.Second
-	DefaultMaxDelay       = 5 * time.Minute
-	DefaultJitterFactor   = 0.5
+	DefaultMaxRetries   = 3
+	DefaultBaseDelay    = 5 * time.Second
+	DefaultMaxDelay     = 5 * time.Minute
+	DefaultJitterFactor = 0.5
 )
 
 // TaskResultRequest represents the task result payload from an agent
@@ -230,7 +230,7 @@ func (a *API) updateTaskRetryState(ctx context.Context, taskID uuid.UUID, status
 		}
 
 		shouldRetry, reason := agent.ShouldRetryTask(retryInfo)
-		
+
 		if shouldRetry {
 			// Increment retry count
 			newRetryCount := *task.RetryCount + 1
@@ -253,13 +253,13 @@ func (a *API) updateTaskRetryState(ctx context.Context, taskID uuid.UUID, status
 			// Keep task in pending state for retry
 			task.Status = "pending"
 
-			log.Printf("Task %s will retry (attempt %d/%d) at %s", 
+			log.Printf("Task %s will retry (attempt %d/%d) at %s",
 				taskID, newRetryCount, *task.MaxRetries, nextRetry.Format(time.RFC3339))
 		} else {
 			// Permanent failure or max retries exceeded
 			task.Status = "failed"
 			task.CompletedAt = timePtr(time.Now())
-			
+
 			if reason != "" {
 				log.Printf("Task %s marked as failed: %s", taskID, reason)
 			}

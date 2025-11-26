@@ -17,7 +17,7 @@ func TestHeartbeatPayloadWithLoad(t *testing.T) {
 		}
 
 		executor := NewTaskExecutorWithConcurrency("echo", config)
-		
+
 		// Simulate running tasks
 		executor.mu.Lock()
 		executor.runningTasks["task1"] = "backup"
@@ -43,7 +43,7 @@ func TestHeartbeatPayloadWithLoad(t *testing.T) {
 		}
 
 		executor := NewTaskExecutorWithConcurrency("echo", config)
-		
+
 		// Simulate 2 running tasks
 		executor.mu.Lock()
 		executor.runningTasks["task1"] = "backup"
@@ -61,11 +61,11 @@ func TestHeartbeatPayloadWithLoad(t *testing.T) {
 		assert.NotNil(t, payload.AvailableSlots)
 		assert.Equal(t, 3, *payload.AvailableSlots) // 5 total - 2 used
 		assert.NotNil(t, payload.AvailableSlotsByType)
-		
+
 		backupSlots := findTaskTypeCapacity(payload.AvailableSlotsByType, "backup")
 		assert.NotNil(t, backupSlots)
 		assert.Equal(t, 1, backupSlots.Available) // 3 backup - 2 used
-		
+
 		checkSlots := findTaskTypeCapacity(payload.AvailableSlotsByType, "check")
 		assert.NotNil(t, checkSlots)
 		assert.Equal(t, 2, checkSlots.Available) // 2 check - 0 used

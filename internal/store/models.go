@@ -31,10 +31,10 @@ type Agent struct {
 	CPUQuotaPercent      *int `gorm:"default:50" json:"cpu_quota_percent,omitempty"`
 	BandwidthLimitMbps   *int `json:"bandwidth_limit_mbps,omitempty"`
 	// Backoff state tracking (EPIC 15 Phase 6)
-	TasksInBackoff       *int       `gorm:"default:0" json:"tasks_in_backoff,omitempty"`
-	EarliestRetryAt      *time.Time `gorm:"index" json:"earliest_retry_at,omitempty"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	TasksInBackoff  *int       `gorm:"default:0" json:"tasks_in_backoff,omitempty"`
+	EarliestRetryAt *time.Time `gorm:"index" json:"earliest_retry_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 // TableName specifies the table name for Agent
@@ -207,15 +207,15 @@ type Task struct {
 	StartedAt       *time.Time `json:"started_at,omitempty"`
 	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 	ErrorMessage    *string    `gorm:"type:text" json:"error_message,omitempty"`
-	
+
 	// Retry tracking fields (EPIC 15)
-	RetryCount         *int       `gorm:"default:0" json:"retry_count,omitempty"`
-	MaxRetries         *int       `gorm:"default:3" json:"max_retries,omitempty"`
-	NextRetryAt        *time.Time `gorm:"index" json:"next_retry_at,omitempty"`
-	LastErrorCategory  *string    `gorm:"type:varchar(100)" json:"last_error_category,omitempty"`
-	
-	CreatedAt       time.Time  `gorm:"index" json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	RetryCount        *int       `gorm:"default:0" json:"retry_count,omitempty"`
+	MaxRetries        *int       `gorm:"default:3" json:"max_retries,omitempty"`
+	NextRetryAt       *time.Time `gorm:"index" json:"next_retry_at,omitempty"`
+	LastErrorCategory *string    `gorm:"type:varchar(100)" json:"last_error_category,omitempty"`
+
+	CreatedAt time.Time `gorm:"index" json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // TableName specifies the table name for Task
