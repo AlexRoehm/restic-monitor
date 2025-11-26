@@ -21,10 +21,10 @@ import (
 // Run starts the HTTP API and shuts it down when the context is canceled.
 func Run(ctx context.Context, addr string, cfg config.Config, st *store.Store, mon Monitor, staticDir string) error {
 	api := New(cfg, st, mon, staticDir)
-	
+
 	// Start agent monitoring to mark stale agents offline
 	api.StartAgentMonitor(ctx)
-	
+
 	srv := &http.Server{
 		Addr:    addr,
 		Handler: api.Handler(),
@@ -75,7 +75,7 @@ func (a *API) Handler() http.Handler {
 
 	// Agent API routes
 	mux.HandleFunc("/agents/register", a.handleAgentRegister)
-	mux.HandleFunc("/agents", a.handleGetAgents)     // GET /agents (list)
+	mux.HandleFunc("/agents", a.handleGetAgents) // GET /agents (list)
 
 	// Policy API routes
 	mux.HandleFunc("/policies/", a.handlePolicies) // Handles GET/PUT/DELETE for /policies/{id}
