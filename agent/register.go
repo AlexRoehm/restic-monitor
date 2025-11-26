@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,8 +15,12 @@ import (
 
 // RegistrationRequest represents the agent registration request payload
 type RegistrationRequest struct {
-	Hostname  string `json:"hostname"`
-	AuthToken string `json:"authToken"`
+	Hostname  string                 `json:"hostname"`
+	OS        string                 `json:"os"`
+	Arch      string                 `json:"arch"`
+	Version   string                 `json:"version"`
+	AuthToken string                 `json:"authToken,omitempty"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // RegistrationResponse represents the orchestrator's registration response
@@ -55,6 +60,9 @@ func Register(cfg *Config) error {
 	// Prepare registration request
 	reqBody := RegistrationRequest{
 		Hostname:  hostname,
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+		Version:   "1.0.0", // TODO: Pass this as parameter
 		AuthToken: cfg.AuthenticationToken,
 	}
 

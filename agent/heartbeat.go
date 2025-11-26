@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"runtime"
 	"time"
@@ -26,9 +27,9 @@ type TaskTypeCapacity struct {
 
 // HeartbeatPayload represents the data sent to the orchestrator in a heartbeat
 type HeartbeatPayload struct {
-	AgentVersion  string     `json:"agentVersion"`
-	Platform      string     `json:"platform"`     // e.g., "linux", "darwin", "windows"
-	Architecture  string     `json:"architecture"` // e.g., "amd64", "arm64"
+	Version       string     `json:"version"`        // Changed from agentVersion to match API
+	OS            string     `json:"os"`             // Changed from platform to match API
+	Arch          string     `json:"arch,omitempty"` // Changed from architecture to match API
 	UptimeSeconds int64      `json:"uptimeSeconds"`
 	DiskUsageMB   int64      `json:"diskUsageMB,omitempty"`
 	LastBackupAt  *time.Time `json:"lastBackupAt,omitempty"`
@@ -99,9 +100,9 @@ func (hc *HeartbeatClient) sendHeartbeatOnce() error {
 
 	// Build payload
 	payload := HeartbeatPayload{
-		AgentVersion:  hc.agentVersion,
-		Platform:      runtime.GOOS,
-		Architecture:  runtime.GOARCH,
+		Version:       hc.agentVersion,
+		OS:            runtime.GOOS,
+		Arch:          runtime.GOARCH,
 		UptimeSeconds: int64(time.Since(hc.startTime).Seconds()),
 		HeartbeatAt:   time.Now(),
 	}
@@ -111,6 +112,8 @@ func (hc *HeartbeatClient) sendHeartbeatOnce() error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal heartbeat payload: %w", err)
 	}
+
+	log.Printf("[DEBUG] Heartbeat payload: %s", string(payloadBytes))
 
 	// Build URL
 	url := fmt.Sprintf("%s/agents/%s/heartbeat", hc.config.OrchestratorURL, hc.state.AgentID)
@@ -151,9 +154,9 @@ func (hc *HeartbeatClient) sendHeartbeatOnce() error {
 // BuildHeartbeatPayloadWithLoad creates a heartbeat payload with load information
 func BuildHeartbeatPayloadWithLoad(executor *TaskExecutor, version string, uptimeSeconds int64) *HeartbeatPayload {
 	payload := &HeartbeatPayload{
-		AgentVersion:  version,
-		Platform:      runtime.GOOS,
-		Architecture:  runtime.GOARCH,
+		Version:       version,
+		OS:            runtime.GOOS,
+		Arch:          runtime.GOARCH,
 		UptimeSeconds: uptimeSeconds,
 		HeartbeatAt:   time.Now(),
 	}

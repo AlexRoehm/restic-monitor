@@ -104,6 +104,44 @@
         </div>
       </div>
 
+      <!-- Agents Section -->
+      <div v-if="agents.length > 0" class="mb-8">
+        <h2 class="text-2xl font-bold mb-4 flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+          </svg>
+          Backup Agents
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div v-for="agent in agents" :key="agent.id" class="card bg-base-100 shadow-lg border border-base-300">
+            <div class="card-body p-4">
+              <div class="flex items-start justify-between mb-2">
+                <h3 class="font-bold text-lg">{{ agent.hostname }}</h3>
+                <div class="badge" :class="agentStatusClass(agent)">{{ agent.status }}</div>
+              </div>
+              <div class="text-sm space-y-1 text-base-content/70">
+                <div class="flex justify-between">
+                  <span>Version:</span>
+                  <span class="font-mono">{{ agent.version }}</span>
+                </div>
+                <div class="flex justify-between">
+                  <span>OS:</span>
+                  <span class="font-mono">{{ agent.os }}/{{ agent.arch }}</span>
+                </div>
+                <div class="flex justify-between">
+                  <span>Uptime:</span>
+                  <span>{{ formatUptime(agent.uptime_seconds) }}</span>
+                </div>
+                <div class="flex justify-between">
+                  <span>Last seen:</span>
+                  <span>{{ formatTime(agent.last_seen_at) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Loading State -->
       <div v-if="loading" class="flex flex-col justify-center items-center h-96">
         <span class="loading loading-bars loading-lg text-primary"></span>
@@ -435,6 +473,7 @@ import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 
 const backups = ref([])
+const agents = ref([])
 const loading = ref(false)
 const error = ref(null)
 const unlocking = ref({})
@@ -803,13 +842,72 @@ const formatFileSize = (bytes) => {
   return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
 }
 
+const formatTime = (timestamp) => {
+  if (!timestamp) return 'Never'
+  const date = new Date(timestamp)
+  const now = new Date()
+  const diffMs = now - date
+  const diffMins = Math.floor(diffMs / 60000)
+  
+  if (diffMins < 1) return 'Just now'
+  if (diffMins < 60) return `${diffMins}m ago`
+  
+  const diffHours = Math.floor(diffMins / 60)
+  if (diffHours < 24) return `${diffHours}h ago`
+  
+  const diffDays = Math.floor(diffHours / 24)
+  if (diffDays < 7) return `${diffDays}d ago`
+  
+  return date.toLocaleDateString()
+}
+
 const toggleTheme = (e) => {
   document.documentElement.setAttribute('data-theme', e.target.checked ? 'dark' : 'light')
 }
 
+const fetchAgents = async () => {
+  try {
+    const response = await fetch('/agents', {
+      headers: getAuthHeaders()
+    })
+    
+    if (response.status === 401) {
+      clearAuth()
+      if (promptForAuth()) {
+        return await fetchAgents()
+      }
+      return
+    }
+    
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const data = await response.json()
+    agents.value = data.agents || []
+  } catch (err) {
+    console.error('Failed to fetch agents:', err)
+  }
+}
+
+const agentStatusClass = (agent) => {
+  if (agent.status === 'online') return 'badge-success'
+  if (agent.status === 'offline') return 'badge-error'
+  return 'badge-warning'
+}
+
+const formatUptime = (seconds) => {
+  if (!seconds) return 'N/A'
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  if (days > 0) return `${days}d ${hours}h`
+  if (hours > 0) return `${hours}h ${minutes}m`
+  return `${minutes}m`
+}
+
 onMounted(() => {
   fetchBackups()
+  fetchAgents()
   setInterval(fetchBackups, 30000)
+  setInterval(fetchAgents, 30000)
 })
 </script>
 

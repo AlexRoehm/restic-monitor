@@ -37,7 +37,7 @@ func Load() (Config, error) {
 		PasswordFile:            os.Getenv("RESTIC_PASSWORD_FILE"),
 		CertificateFile:         os.Getenv("RESTIC_CERT_FILE"),
 		DatabaseDSN:             firstNonEmpty(os.Getenv("DATABASE_DSN"), "restic-monitor.db"),
-		APIListenAddr:           firstNonEmpty(os.Getenv("API_LISTEN_ADDR"), ":8080"),
+		APIListenAddr:           firstNonEmpty(os.Getenv("API_LISTEN_ADDR"), ":4711"),
 		CheckInterval:           mustParseDuration(os.Getenv("CHECK_INTERVAL"), 5*time.Minute),
 		ResticTimeout:           mustParseDuration(os.Getenv("RESTIC_TIMEOUT"), 60*time.Second),
 		SnapshotLimit:           mustParseInt(os.Getenv("SNAPSHOT_FILE_LIMIT"), 200),

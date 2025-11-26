@@ -1,0 +1,5 @@
+orchestratorUrl: "http://localhost:4711"
+authenticationToken: "dev-token-123"
+logLevel: "info"
+stateFile: "./tmp/agent-state/state.json"
+tempDir: "./tmp/agent-temp"
