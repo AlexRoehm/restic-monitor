@@ -177,15 +177,52 @@
 
 ---
 
-# **EPIC 16 — Policy Management UI**
+# **EPIC 16 — Unified Multi-Agent Backup Policy Orchestration & User-Friendly Configuration Framework** ⭐ SUPER-EPIC
+
+**Status**: 📋 Planning Complete | **Effort**: 180h | **Tests**: +310 | **Documentation**: `/docs/epic16-status.md`
+
+### Overview
+
+This is a **super-epic** consolidating multiple advanced features:
+- Multi-repo + multi-agent orchestration (original scope)
+- Filesystem browser for visual path selection
+- Visual include/exclude rule builder
+- Agent sandbox security enforcement
+- Credential & certificate management (moved from Epic 10)
+- Pre/post hook integration (coordination with Epic 14)
+
+**Strategic Importance**: Foundation for Epics 17-21 (Preflight, Smart Triggering, Forecasting, DR/Restore, Policy Wizard)
 
 ### User Stories
 
-1. Create UI for policy CRUD
-2. Cron editor UI
-3. Include/exclude path editor
-4. Repository backend selector
-5. Validation & inline error feedback
+1. **Backup Policy CRUD System (Unified)** — Centralized policy management with conflict detection
+2. **Agent-Side Policy Application** — Agents receive optimized, validated policies
+3. **Agent Filesystem Browser API** — Browse agent filesystems remotely with sandbox enforcement
+4. **Visual Include/Exclude Rule Builder UI** — Interactive tree with pattern preview
+5. **Agent Sandbox Configuration & Enforcement** — Security restrictions for path access
+6. **Repository Credentials & Certificate Management** — Secure storage with encrypted delivery
+7. **Pre/Post Hook Integration** — Database dumps and service management around backups
+8. **Policy–Agent Link Management UI** — Bulk assignment with validation status
+
+### Key Deliverables
+
+- 1 new model (Credential with AES-256-GCM encryption)
+- 3 migrations (007-009)
+- 4 new services (PolicyValidator, SandboxEngine, EncryptionService, FilesystemService)
+- 5 new API endpoints (credentials, filesystem browser, token generation)
+- 1 major UI component (FilesystemTree.vue with lazy loading)
+- 310 new tests (989 total post-epic)
+
+### Implementation Phases
+
+1. **Phase 1** (40h): Policy model extensions + PolicyValidator + conflict detection
+2. **Phase 2** (45h): SandboxEngine + EncryptionService + Credential API
+3. **Phase 3** (25h): FilesystemService + orchestrator proxy + caching
+4. **Phase 4** (40h): Visual rule builder UI + pattern generator
+5. **Phase 5** (15h): Hook integration with Epic 14
+6. **Phase 6** (15h): Validation status UI + bulk assignment + polish
+
+**See**: `/docs/epic16-status.md` for comprehensive implementation plan
 
 ---
 

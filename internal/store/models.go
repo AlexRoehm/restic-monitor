@@ -33,8 +33,10 @@ type Agent struct {
 	// Backoff state tracking (EPIC 15 Phase 6)
 	TasksInBackoff  *int       `gorm:"default:0" json:"tasks_in_backoff,omitempty"`
 	EarliestRetryAt *time.Time `gorm:"index" json:"earliest_retry_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	// EPIC 16 additions
+	SandboxConfig   JSONB     `gorm:"serializer:json" json:"sandbox_config,omitempty"` // {allowed: [], forbidden: [], maxDepth: int}
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // TableName specifies the table name for Agent
@@ -65,12 +67,20 @@ type Policy struct {
 	RepositoryType     string    `gorm:"type:varchar(50);not null" json:"repository_type"` // s3, sftp, local, rest
 	RepositoryConfig   JSONB     `gorm:"serializer:json" json:"repository_config,omitempty"`
 	RetentionRules     JSONB     `gorm:"serializer:json;not null" json:"retention_rules"`
-	BandwidthLimitKBps *int      `json:"bandwidth_limit_kbps,omitempty"`
-	ParallelFiles      *int      `json:"parallel_files,omitempty"`
-	MaxRetries         *int      `gorm:"default:3" json:"max_retries,omitempty"` // EPIC 15 Phase 5
-	Enabled            bool      `gorm:"not null" json:"enabled"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	BandwidthLimitKBps *int       `json:"bandwidth_limit_kbps,omitempty"`
+	ParallelFiles      *int       `json:"parallel_files,omitempty"`
+	MaxRetries         *int       `gorm:"default:3" json:"max_retries,omitempty"` // EPIC 15 Phase 5
+	// EPIC 16 additions
+	SandboxConfig      JSONB      `gorm:"serializer:json" json:"sandbox_config,omitempty"`       // {allowed: [], forbidden: [], maxDepth: int}
+	CredentialsID      *uuid.UUID `gorm:"type:uuid" json:"credentials_id,omitempty"`             // Foreign key to credentials table
+	PreHooks           JSONB      `gorm:"serializer:json" json:"pre_hooks,omitempty"`            // Array of hook IDs
+	PostHooks          JSONB      `gorm:"serializer:json" json:"post_hooks,omitempty"`           // Array of hook IDs
+	ValidationStatus   string     `gorm:"type:varchar(50);default:'valid'" json:"validation_status,omitempty"` // valid, invalid, warning
+	ValidationErrors   JSONB      `gorm:"serializer:json" json:"validation_errors,omitempty"`    // Array of error messages
+	PolicyVersion      int        `gorm:"default:1" json:"policy_version,omitempty"`             // Incremented on each update
+	Enabled            bool       `gorm:"not null" json:"enabled"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 // TableName specifies the table name for Policy
@@ -214,6 +224,13 @@ type Task struct {
 	NextRetryAt       *time.Time `gorm:"index" json:"next_retry_at,omitempty"`
 	LastErrorCategory *string    `gorm:"type:varchar(100)" json:"last_error_category,omitempty"`
 
+	// EPIC 16 additions
+	CredentialsToken *string `gorm:"type:text" json:"credentials_token,omitempty"` // Time-limited JWT token for credential access
+	PreHooks         JSONB   `gorm:"serializer:json" json:"pre_hooks,omitempty"`   // Array of hook definitions to execute before task
+	PostHooks        JSONB   `gorm:"serializer:json" json:"post_hooks,omitempty"`  // Array of hook definitions to execute after task
+	SandboxConfig    JSONB   `gorm:"serializer:json" json:"sandbox_config,omitempty"` // Sandbox configuration from policy
+	PolicyVersion    *int    `json:"policy_version,omitempty"`                     // Version of policy when task was created
+
 	CreatedAt time.Time `gorm:"index" json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -231,6 +248,39 @@ func (t *Task) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// Credential represents encrypted repository credentials and certificates (EPIC 16)
+type Credential struct {
+	ID                uuid.UUID  `gorm:"primaryKey" json:"id"`
+	TenantID          uuid.UUID  `gorm:"not null;index;uniqueIndex:idx_credential_name_tenant" json:"tenant_id"`
+	Name              string     `gorm:"type:varchar(255);not null;uniqueIndex:idx_credential_name_tenant" json:"name"`
+	Type              string     `gorm:"type:varchar(50);not null" json:"type"` // password, cert, aws, gcs
+	// Encrypted fields (stored as encrypted base64 strings)
+	PasswordHash      *string    `gorm:"type:text" json:"-"` // Encrypted repository password
+	CertificatePEM    *string    `gorm:"type:text" json:"-"` // Encrypted TLS certificate
+	CertificateKeyPEM *string    `gorm:"type:text" json:"-"` // Encrypted TLS certificate private key
+	CAChainPEM        *string    `gorm:"type:text" json:"-"` // Encrypted CA chain
+	// Cloud provider credentials
+	AccessKeyID       *string    `gorm:"type:text" json:"-"` // AWS/S3 access key ID (encrypted)
+	SecretAccessKey   *string    `gorm:"type:text" json:"-"` // AWS/S3 secret access key (encrypted)
+	// Metadata
+	ExpiresAt         *time.Time `json:"expires_at,omitempty"` // Certificate expiry date
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
+// TableName specifies the table name for Credential
+func (Credential) TableName() string {
+	return "credentials"
+}
+
+// BeforeCreate hook to generate UUID if not set
+func (c *Credential) BeforeCreate(tx *gorm.DB) error {
+	if c.ID == uuid.Nil {
+		c.ID = uuid.New()
+	}
+	return nil
+}
+
 // MigrateModels runs GORM automigration for all models
 func MigrateModels(db *gorm.DB) error {
 	return db.AutoMigrate(
@@ -240,5 +290,6 @@ func MigrateModels(db *gorm.DB) error {
 		&BackupRun{},
 		&BackupRunLog{},
 		&Task{},
+		&Credential{},
 	)
 }

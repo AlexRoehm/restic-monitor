@@ -641,3 +641,164 @@ func TestMigration009AddAgentBackoffState(t *testing.T) {
 		assert.Nil(t, loaded.EarliestRetryAt)
 	})
 }
+
+// TestMigration010AddEpic16Phase1Fields tests EPIC 16 Phase 1 migration
+func TestMigration010AddEpic16Phase1Fields(t *testing.T) {
+	// Create in-memory database
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+
+	// Initialize migration runner
+	runner := store.NewMigrationRunner(db)
+	ctx := context.Background()
+	
+	err = runner.Initialize(ctx)
+	require.NoError(t, err)
+
+	// Run migrations up to 009 to establish base schema
+	tenantID := uuid.New()
+	migrations := store.GetAllMigrations(tenantID)
+	
+	// Run migrations 001-009
+	for i := 0; i < 9; i++ {
+		err = runner.Run(ctx, migrations[i])
+		require.NoError(t, err, "Migration %s failed", migrations[i].Version)
+	}
+
+	// Verify migration 010 is not applied yet
+	applied, err := runner.IsApplied(ctx, "010")
+	require.NoError(t, err)
+	assert.False(t, applied, "Migration 010 should not be applied yet")
+
+	// Run migration 010
+	migration010 := store.GetMigration010AddEpic16Phase1Fields()
+	err = runner.Run(ctx, migration010)
+	require.NoError(t, err)
+
+	// Verify migration 010 is now applied
+	applied, err = runner.IsApplied(ctx, "010")
+	require.NoError(t, err)
+	assert.True(t, applied, "Migration 010 should be applied")
+
+	// Verify credentials table was created
+	var tableExists bool
+	err = db.Raw("SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='credentials'").Scan(&tableExists).Error
+	require.NoError(t, err)
+	assert.True(t, tableExists, "credentials table should exist")
+
+	// Verify new columns exist in policies table
+	var columns []string
+	err = db.Raw("SELECT name FROM pragma_table_info('policies')").Scan(&columns).Error
+	require.NoError(t, err)
+	assert.Contains(t, columns, "sandbox_config")
+	assert.Contains(t, columns, "credentials_id")
+	assert.Contains(t, columns, "pre_hooks")
+	assert.Contains(t, columns, "post_hooks")
+	assert.Contains(t, columns, "validation_status")
+	assert.Contains(t, columns, "validation_errors")
+	assert.Contains(t, columns, "policy_version")
+
+	// Verify new column exists in agents table
+	columns = []string{}
+	err = db.Raw("SELECT name FROM pragma_table_info('agents')").Scan(&columns).Error
+	require.NoError(t, err)
+	assert.Contains(t, columns, "sandbox_config")
+
+	// Verify new columns exist in tasks table
+	columns = []string{}
+	err = db.Raw("SELECT name FROM pragma_table_info('tasks')").Scan(&columns).Error
+	require.NoError(t, err)
+	assert.Contains(t, columns, "credentials_token")
+	assert.Contains(t, columns, "pre_hooks")
+	assert.Contains(t, columns, "post_hooks")
+	assert.Contains(t, columns, "sandbox_config")
+	assert.Contains(t, columns, "policy_version")
+
+	// Test creating a credential
+	password := "encrypted_password"
+	cred := &store.Credential{
+		TenantID:     tenantID,
+		Name:         "test-creds",
+		Type:         store.CredentialTypePassword,
+		PasswordHash: &password,
+	}
+	err = db.Create(cred).Error
+	require.NoError(t, err)
+
+	// Test creating a policy with new fields
+	policy := &store.Policy{
+		TenantID:      tenantID,
+		Name:          "test-policy",
+		Schedule:      "0 2 * * *",
+		IncludePaths:  store.JSONB{"paths": []interface{}{"/home"}},
+		RepositoryURL: "s3:bucket",
+		RepositoryType: "s3",
+		RetentionRules: store.JSONB{"keep_daily": 7},
+		SandboxConfig: store.JSONB{
+			"allowed":   []interface{}{"/home", "/var"},
+			"forbidden": []interface{}{"/etc/shadow"},
+		},
+		CredentialsID:      &cred.ID,
+		PreHooks:          store.JSONB{"hooks": []interface{}{}},
+		PostHooks:         store.JSONB{"hooks": []interface{}{}},
+		ValidationStatus:  "valid",
+		ValidationErrors:  store.JSONB{},
+		PolicyVersion:     1,
+		Enabled:           true,
+	}
+	err = db.Create(policy).Error
+	require.NoError(t, err)
+
+	// Verify policy was created with new fields
+	var loaded store.Policy
+	err = db.Where("id = ?", policy.ID).First(&loaded).Error
+	require.NoError(t, err)
+	assert.Equal(t, "valid", loaded.ValidationStatus)
+	assert.Equal(t, 1, loaded.PolicyVersion)
+	assert.NotNil(t, loaded.SandboxConfig)
+	assert.NotNil(t, loaded.CredentialsID)
+	assert.Equal(t, cred.ID, *loaded.CredentialsID)
+
+	// Verify indexes were created
+	var indexExists bool
+	err = db.Raw("SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='index' AND name='idx_credentials_tenant_id'").Scan(&indexExists).Error
+	require.NoError(t, err)
+	assert.True(t, indexExists, "idx_credentials_tenant_id should exist")
+
+	err = db.Raw("SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='index' AND name='idx_policies_credentials_id'").Scan(&indexExists).Error
+	require.NoError(t, err)
+	assert.True(t, indexExists, "idx_policies_credentials_id should exist")
+}
+
+// TestMigration010Idempotent tests that migration 010 can be run multiple times safely
+func TestMigration010Idempotent(t *testing.T) {
+	// Create in-memory database
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+
+	// Initialize migration runner
+	runner := store.NewMigrationRunner(db)
+	ctx := context.Background()
+	
+	err = runner.Initialize(ctx)
+	require.NoError(t, err)
+
+	// Run migration 010 twice
+	migration010 := store.GetMigration010AddEpic16Phase1Fields()
+	
+	err = runner.Run(ctx, migration010)
+	require.NoError(t, err, "First run should succeed")
+
+	err = runner.Run(ctx, migration010)
+	require.NoError(t, err, "Second run should be skipped (idempotent)")
+
+	// Verify it was only recorded once
+	var count int64
+	err = db.Model(&store.SchemaMigration{}).Where("version = ?", "010").Count(&count).Error
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count, "Migration should only be recorded once")
+}

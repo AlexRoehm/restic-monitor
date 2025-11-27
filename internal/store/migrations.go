@@ -114,6 +114,7 @@ func GetAllMigrations(defaultTenantID uuid.UUID) []Migration {
 		GetMigration007AddTaskRetryTracking(),
 		GetMigration008AddPolicyMaxRetries(),
 		GetMigration009AddAgentBackoffState(),
+		GetMigration010AddEpic16Phase1Fields(),
 	}
 }
 
@@ -367,6 +368,60 @@ func GetMigration009AddAgentBackoffState() Migration {
 			if err := tx.AutoMigrate(&Agent{}); err != nil {
 				return fmt.Errorf("adding backoff state to agents: %w", err)
 			}
+			return nil
+		},
+	}
+}
+
+// GetMigration010AddEpic16Phase1Fields adds EPIC 16 Phase 1 fields for sandbox, credentials, hooks
+func GetMigration010AddEpic16Phase1Fields() Migration {
+	return Migration{
+		Version:     "010",
+		Description: "EPIC 16 Phase 1: Add sandbox_config, credentials, hooks, and validation fields to policies, agents, and tasks",
+		Up: func(tx *gorm.DB) error {
+			// Create credentials table
+			if err := tx.AutoMigrate(&Credential{}); err != nil {
+				return fmt.Errorf("creating credentials table: %w", err)
+			}
+
+			// Add new columns to policies table
+			// - sandbox_config (JSONB)
+			// - credentials_id (UUID FK)
+			// - pre_hooks (JSONB)
+			// - post_hooks (JSONB)
+			// - validation_status (string)
+			// - validation_errors (JSONB)
+			// - policy_version (int)
+			if err := tx.AutoMigrate(&Policy{}); err != nil {
+				return fmt.Errorf("adding EPIC 16 fields to policies: %w", err)
+			}
+
+			// Add new columns to agents table
+			// - sandbox_config (JSONB)
+			if err := tx.AutoMigrate(&Agent{}); err != nil {
+				return fmt.Errorf("adding sandbox_config to agents: %w", err)
+			}
+
+			// Add new columns to tasks table
+			// - credentials_token (text)
+			// - pre_hooks (JSONB)
+			// - post_hooks (JSONB)
+			// - sandbox_config (JSONB)
+			// - policy_version (int)
+			if err := tx.AutoMigrate(&Task{}); err != nil {
+				return fmt.Errorf("adding EPIC 16 fields to tasks: %w", err)
+			}
+
+			// Create index on credentials tenant_id for efficient queries
+			if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_credentials_tenant_id ON credentials(tenant_id)`).Error; err != nil {
+				return fmt.Errorf("creating index on credentials.tenant_id: %w", err)
+			}
+
+			// Create index on policies credentials_id for FK lookups
+			if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_policies_credentials_id ON policies(credentials_id)`).Error; err != nil {
+				return fmt.Errorf("creating index on policies.credentials_id: %w", err)
+			}
+
 			return nil
 		},
 	}
